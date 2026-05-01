@@ -1,559 +1,326 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DALB — SDN Load Balancing Dashboard</title>
+<title>SDN DALB Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
-  :root {
-    --bg:       #0d1117;
-    --surface:  #161b22;
-    --border:   #30363d;
-    --text:     #e6edf3;
-    --muted:    #8b949e;
-    --green:    #3fb950;
-    --red:      #f85149;
-    --yellow:   #d29922;
-    --blue:     #58a6ff;
-    --purple:   #bc8cff;
-    --orange:   #ffa657;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: var(--bg); color: var(--text);
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    font-size: 14px; line-height: 1.5;
-  }
-
-  /* ── Header ─────────────────────────────────────────────── */
-  header {
-    background: var(--surface); border-bottom: 1px solid var(--border);
-    padding: 14px 24px; display: flex; align-items: center; gap: 12px;
-  }
-  header h1 { font-size: 18px; font-weight: 600; }
-  header .badge {
-    background: #1f6feb33; color: var(--blue);
-    border: 1px solid #1f6feb66;
-    padding: 2px 10px; border-radius: 20px; font-size: 12px;
-  }
-  #refresh-indicator {
-    margin-left: auto; display: flex; align-items: center; gap: 6px;
-    color: var(--muted); font-size: 12px;
-  }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
-  .dot.red { background: var(--red); }
-  .dot.pulse { animation: pulse 1.5s ease-in-out infinite; }
-  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
-
-  /* ── Layout ─────────────────────────────────────────────── */
-  main { padding: 20px 24px; display: flex; flex-direction: column; gap: 20px; }
-
-  /* ── Metric row ─────────────────────────────────────────── */
-  .metric-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-
-  /* ── Controller card ─────────────────────────────────────── */
-  .ctrl-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 14px;
-    transition: border-color .3s;
-  }
-  .ctrl-card.overloaded { border-color: var(--red); }
-  .ctrl-card.normal     { border-color: var(--green); }
-
-  .ctrl-header { display: flex; align-items: center; gap: 10px; }
-  .ctrl-label {
-    font-size: 20px; font-weight: 700; font-family: monospace;
-  }
-  .ctrl-label.A { color: var(--blue); }
-  .ctrl-label.B { color: var(--purple); }
-
-  .status-badge {
-    padding: 3px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
-  }
-  .status-badge.NORMAL    { background: #3fb95022; color: var(--green); border: 1px solid #3fb95055; }
-  .status-badge.OVERLOADED{ background: #f8514922; color: var(--red);   border: 1px solid #f8514955; }
-
-  .load-number {
-    font-size: 36px; font-weight: 700; font-family: monospace;
-    letter-spacing: -1px;
-  }
-  .load-unit { font-size: 16px; color: var(--muted); }
-
-  .load-bar-wrap { background: #21262d; border-radius: 4px; height: 6px; }
-  .load-bar {
-    height: 6px; border-radius: 4px;
-    background: var(--green); transition: width .5s ease, background .3s;
-  }
-  .load-bar.warn  { background: var(--yellow); }
-  .load-bar.crit  { background: var(--red); }
-
-  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .stat { background: #21262d; border-radius: 6px; padding: 8px 12px; }
-  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-  .stat-value { font-size: 16px; font-weight: 600; font-family: monospace; margin-top: 2px; }
-
-  /* switch pills */
-  .switch-pills { display: flex; flex-wrap: wrap; gap: 6px; }
-  .pill {
-    padding: 3px 10px; border-radius: 20px; font-size: 12px;
-    background: #21262d; border: 1px solid var(--border); font-family: monospace;
-  }
-
-  /* ── rho bar ─────────────────────────────────────────────── */
-  .rho-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 10px; padding: 18px;
-  }
-  .rho-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
-  .rho-val { font-size: 32px; font-weight: 700; font-family: monospace; }
-  .rho-bar-wrap { flex: 1; background: #21262d; border-radius: 4px; height: 10px; }
-  .rho-bar { height: 10px; border-radius: 4px; transition: width .5s ease, background .3s; }
-  .rho-threshold-line {
-    position: relative; flex: 1; height: 10px; background: #21262d; border-radius: 4px;
-  }
-  .rho-threshold-line::after {
-    content: '0.7';
-    position: absolute; left: 70%; top: -20px;
-    font-size: 11px; color: var(--yellow); transform: translateX(-50%);
-  }
-  .rho-threshold-line::before {
-    content: '';
-    position: absolute; left: 70%; top: 0; bottom: 0;
-    width: 2px; background: var(--yellow); border-radius: 1px;
-  }
-
-  /* ── Charts ─────────────────────────────────────────────── */
-  .chart-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 10px; padding: 18px;
-  }
-  .card-title {
-    font-size: 13px; font-weight: 600; color: var(--muted);
-    text-transform: uppercase; letter-spacing: .5px; margin-bottom: 14px;
-  }
-  .chart-wrap { position: relative; height: 220px; }
-
-  /* ── Switch table ────────────────────────────────────────── */
-  .table-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 10px; padding: 18px;
-  }
-  table { width: 100%; border-collapse: collapse; }
-  th {
-    text-align: left; padding: 8px 12px;
-    font-size: 11px; color: var(--muted);
-    text-transform: uppercase; letter-spacing: .5px;
-    border-bottom: 1px solid var(--border);
-  }
-  td { padding: 8px 12px; border-bottom: 1px solid #21262d; font-family: monospace; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #21262d22; }
-  .ctrl-tag { font-weight: 700; }
-  .ctrl-tag.A { color: var(--blue); }
-  .ctrl-tag.B { color: var(--purple); }
-
-  /* ── Migration log ───────────────────────────────────────── */
-  .log-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 10px; padding: 18px;
-  }
-  #migration-log {
-    max-height: 160px; overflow-y: auto;
-    display: flex; flex-direction: column-reverse; gap: 6px;
-  }
-  .log-entry {
-    font-family: monospace; font-size: 13px;
-    padding: 6px 10px; border-radius: 6px;
-    background: #21262d;
-    display: flex; gap: 10px; align-items: center;
-  }
-  .log-time { color: var(--muted); }
-  .log-msg  { color: var(--green); }
-
-  /* ── Error banner ────────────────────────────────────────── */
-  #error-banner {
-    display: none; background: #f8514922; border: 1px solid var(--red);
-    border-radius: 8px; padding: 10px 16px; color: var(--red);
-    font-size: 13px;
-  }
-
-  footer {
-    text-align: center; padding: 12px; color: var(--muted); font-size: 12px;
-    border-top: 1px solid var(--border);
-  }
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#c9d1d9;font-family:'Segoe UI',monospace;font-size:14px}
+h1{text-align:center;padding:16px 0 4px;color:#58a6ff;font-size:20px;letter-spacing:1px}
+.subtitle{text-align:center;color:#8b949e;font-size:12px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px 16px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px}
+.card h2{font-size:13px;color:#8b949e;text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;border-bottom:1px solid #21262d;padding-bottom:6px}
+.status-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.badge{padding:2px 8px;border-radius:12px;font-size:11px;font-weight:bold}
+.badge.online{background:#1a3a1a;color:#3fb950;border:1px solid #3fb950}
+.badge.offline{background:#3a1a1a;color:#f85149;border:1px solid #f85149}
+.badge.normal{background:#1a2a3a;color:#58a6ff;border:1px solid #58a6ff}
+.badge.overloaded{background:#3a1a00;color:#f0883e;border:1px solid #f0883e}
+.metric{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #21262d}
+.metric:last-child{border-bottom:none}
+.metric label{color:#8b949e;font-size:12px}
+.metric value{font-size:15px;font-weight:bold;color:#e6edf3}
+.hi{color:#f85149!important}
+.ok{color:#3fb950!important}
+.warn{color:#f0883e!important}
+.bar-wrap{height:10px;background:#21262d;border-radius:5px;overflow:hidden;margin-top:4px}
+.bar{height:100%;border-radius:5px;transition:width .5s}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#21262d;color:#8b949e;padding:6px 8px;text-align:left;font-weight:normal}
+td{padding:5px 8px;border-bottom:1px solid #21262d;color:#e6edf3}
+tr:hover td{background:#1c2128}
+.rho-gauge{display:flex;align-items:center;gap:12px;margin-top:8px}
+.rho-val{font-size:32px;font-weight:bold;min-width:70px}
+.rho-bar-wrap{flex:1;position:relative}
+.rho-bar-bg{height:16px;background:#21262d;border-radius:8px;overflow:hidden}
+.rho-bar{height:100%;border-radius:8px;transition:width .6s}
+.rho-threshold{position:absolute;top:-3px;height:22px;width:2px;background:#f85149;border-radius:1px}
+.rho-label{font-size:11px;color:#8b949e;margin-top:4px;display:flex;justify-content:space-between}
+.full{grid-column:1/3}
+.log-entry{padding:5px 8px;border-bottom:1px solid #21262d;font-size:12px;display:flex;gap:10px;align-items:baseline}
+.log-entry .ts{color:#8b949e;min-width:72px;flex-shrink:0}
+.log-entry .msg{color:#e6edf3}
+#last-update{text-align:center;color:#484f58;font-size:11px;padding:6px}
+.no-data{color:#484f58;font-style:italic;padding:8px;text-align:center}
+.section-title{color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:.8px;margin:10px 0 4px}
 </style>
 </head>
 <body>
 
-<header>
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2">
-    <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
-  </svg>
-  <h1>DALB Dashboard</h1>
-  <span class="badge">SDN Load Balancing</span>
-  <div id="refresh-indicator">
-    <div class="dot pulse" id="refresh-dot"></div>
-    <span id="refresh-text">Connecting…</span>
-  </div>
-</header>
+<h1>SDN DALB — Real-time Dashboard</h1>
+<p class="subtitle">Dynamic &amp; Adaptive Load Balancing | 2 Controllers | 5 Switches | 11 Hosts | Refresh every 3s</p>
 
-<main>
+<div class="grid">
 
-  <!-- Error banner -->
-  <div id="error-banner">⚠ Cannot reach controllers. Make sure both Ryu apps are running.</div>
-
-  <!-- Controller cards -->
-  <div class="metric-row">
-    <div class="ctrl-card" id="card-A">
-      <div class="ctrl-header">
-        <span class="ctrl-label A">Controller A</span>
-        <span class="status-badge" id="status-A">—</span>
-      </div>
-      <div>
-        <span class="load-number" id="load-A">—</span>
-        <span class="load-unit"> pkt/s</span>
-      </div>
-      <div class="load-bar-wrap"><div class="load-bar" id="bar-A" style="width:0%"></div></div>
-      <div class="stats-grid">
-        <div class="stat">
-          <div class="stat-label">CT</div>
-          <div class="stat-value" id="ct-A">—</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Migrations</div>
-          <div class="stat-value" id="mc-A">—</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Uptime</div>
-          <div class="stat-value" id="up-A">—</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">ρ (local)</div>
-          <div class="stat-value" id="rho-A">—</div>
-        </div>
-      </div>
-      <div>
-        <div class="stat-label" style="margin-bottom:6px">Managed Switches</div>
-        <div class="switch-pills" id="switches-A"></div>
-      </div>
+  <!-- ── Controller A ─────────────────────────────────── -->
+  <div class="card">
+    <h2>Controller A &nbsp;<span style="float:right;font-size:11px;font-weight:normal" id="uptime-a"></span></h2>
+    <div class="status-row">
+      <span class="badge offline" id="badge-a">OFFLINE</span>
+      <span class="badge normal" id="sbadge-a" style="display:none">NORMAL</span>
     </div>
-
-    <div class="ctrl-card" id="card-B">
-      <div class="ctrl-header">
-        <span class="ctrl-label B">Controller B</span>
-        <span class="status-badge" id="status-B">—</span>
-      </div>
-      <div>
-        <span class="load-number" id="load-B">—</span>
-        <span class="load-unit"> pkt/s</span>
-      </div>
-      <div class="load-bar-wrap"><div class="load-bar" id="bar-B" style="width:0%"></div></div>
-      <div class="stats-grid">
-        <div class="stat">
-          <div class="stat-label">CT</div>
-          <div class="stat-value" id="ct-B">—</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Migrations</div>
-          <div class="stat-value" id="mc-B">—</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Uptime</div>
-          <div class="stat-value" id="up-B">—</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">ρ (local)</div>
-          <div class="stat-value" id="rho-B">—</div>
-        </div>
-      </div>
-      <div>
-        <div class="stat-label" style="margin-bottom:6px">Managed Switches</div>
-        <div class="switch-pills" id="switches-B"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ρ balance indicator -->
-  <div class="rho-card">
-    <div class="card-title">Cluster Balance Rate (ρ)</div>
-    <div class="rho-row">
-      <span class="rho-val" id="rho-global">—</span>
-      <div style="flex:1; position:relative;">
-        <div class="rho-threshold-line">
-          <div class="rho-bar" id="rho-bar" style="width:0%"></div>
-        </div>
-      </div>
-      <span id="rho-verdict" style="font-weight:600; font-size:13px; min-width:140px; text-align:right">—</span>
-    </div>
-  </div>
-
-  <!-- Load history chart -->
-  <div class="chart-card">
-    <div class="card-title">Load History — last 60 samples</div>
-    <div class="chart-wrap">
-      <canvas id="loadChart"></canvas>
-    </div>
-  </div>
-
-  <!-- Per-switch table -->
-  <div class="table-card">
-    <div class="card-title">Per-Switch Metrics</div>
+    <div class="metric"><label>Total Load (C_Load)</label><value id="load-a">—</value></div>
+    <div class="bar-wrap"><div class="bar" id="bar-a" style="width:0%;background:#3fb950"></div></div>
+    <div class="metric" style="margin-top:8px"><label>Managed Switches</label><value id="sw-a" style="font-size:13px">—</value></div>
+    <div class="metric"><label>Migrations Out</label><value id="mc-a">—</value></div>
+    <div class="metric"><label>CT Threshold</label><value id="ct-a">—</value></div>
+    <div class="metric"><label>Peer (B) Load</label><value id="peer-load-a">—</value></div>
+    <div class="metric"><label>Peer (B) Status</label><value id="peer-st-a">—</value></div>
+    <p class="section-title">Per-Switch Details</p>
     <table>
-      <thead>
-        <tr>
-          <th>Switch</th><th>Controller</th><th>Flows</th>
-          <th>Pkt-in/s</th><th>RTT (ms)</th><th>C_Load</th>
-        </tr>
-      </thead>
-      <tbody id="switch-table-body">
-        <tr><td colspan="6" style="color:var(--muted);text-align:center">Waiting for data…</td></tr>
-      </tbody>
+      <thead><tr><th>Switch</th><th>Flows</th><th>RTT (ms)</th><th>C_Load</th></tr></thead>
+      <tbody id="tbl-a"><tr><td colspan="4" class="no-data">Waiting...</td></tr></tbody>
     </table>
   </div>
 
-  <!-- Migration log -->
-  <div class="log-card">
-    <div class="card-title">Migration Events</div>
-    <div id="migration-log">
-      <div class="log-entry">
-        <span class="log-time">—</span>
-        <span class="log-msg">No migrations yet</span>
-      </div>
+  <!-- ── Controller B ─────────────────────────────────── -->
+  <div class="card">
+    <h2>Controller B &nbsp;<span style="float:right;font-size:11px;font-weight:normal" id="uptime-b"></span></h2>
+    <div class="status-row">
+      <span class="badge offline" id="badge-b">OFFLINE</span>
+      <span class="badge normal" id="sbadge-b" style="display:none">NORMAL</span>
     </div>
+    <div class="metric"><label>Total Load (C_Load)</label><value id="load-b">—</value></div>
+    <div class="bar-wrap"><div class="bar" id="bar-b" style="width:0%;background:#3fb950"></div></div>
+    <div class="metric" style="margin-top:8px"><label>Managed Switches</label><value id="sw-b" style="font-size:13px">—</value></div>
+    <div class="metric"><label>Migrations Out</label><value id="mc-b">—</value></div>
+    <div class="metric"><label>CT Threshold</label><value id="ct-b">—</value></div>
+    <div class="metric"><label>Peer (A) Load</label><value id="peer-load-b">—</value></div>
+    <div class="metric"><label>Peer (A) Status</label><value id="peer-st-b">—</value></div>
+    <p class="section-title">Per-Switch Details</p>
+    <table>
+      <thead><tr><th>Switch</th><th>Flows</th><th>RTT (ms)</th><th>C_Load</th></tr></thead>
+      <tbody id="tbl-b"><tr><td colspan="4" class="no-data">Waiting...</td></tr></tbody>
+    </table>
   </div>
 
-</main>
+  <!-- ── Balance Index (rho) ──────────────────────────── -->
+  <div class="card full">
+    <h2>Balance Index — ρ (rho) = mean(loads) / max(loads)</h2>
+    <div class="rho-gauge">
+      <div class="rho-val ok" id="rho-val">—</div>
+      <div class="rho-bar-wrap">
+        <div class="rho-bar-bg">
+          <div class="rho-bar" id="rho-bar" style="width:0%;background:#3fb950"></div>
+        </div>
+        <div class="rho-threshold" style="left:70%"></div>
+        <div class="rho-label">
+          <span>0.0 (fully imbalanced)</span>
+          <span style="color:#f85149">▲ 0.7 threshold</span>
+          <span>1.0 (perfectly balanced)</span>
+        </div>
+      </div>
+    </div>
+    <p id="rho-desc" style="margin-top:10px;font-size:12px;color:#8b949e">
+      ρ ≥ 0.7: system balanced &nbsp;|&nbsp; ρ &lt; 0.7: imbalanced → migration may trigger
+    </p>
+  </div>
 
-<footer>DALB Dashboard · SDN Final Project · Auto-refresh every 3s</footer>
+  <!-- ── Load History Chart ───────────────────────────── -->
+  <div class="card full">
+    <h2>Load History (last 3 minutes)</h2>
+    <canvas id="chartLoad" height="80"></canvas>
+  </div>
+
+  <!-- ── Migration Log ────────────────────────────────── -->
+  <div class="card full">
+    <h2>Migration Log</h2>
+    <div id="mig-log"><p class="no-data">No migration events yet.</p></div>
+  </div>
+
+</div>
+
+<div id="last-update">Connecting to controllers...</div>
 
 <script>
-// ── Config ────────────────────────────────────────────────────────────────────
-const CTRL_A = 'http://127.0.0.1:8080';
-const CTRL_B = 'http://127.0.0.1:8081';
-const MAX_HISTORY = 60;
-const REFRESH_MS  = 3000;
+const API = { A: 'http://localhost:8080', B: 'http://localhost:8081' };
+const MAX_PTS = 60;
 
-// ── State ─────────────────────────────────────────────────────────────────────
-const history = { labels: [], A: [], B: [] };
-let prevMigrations = { A: 0, B: 0 };
-let lastStatusA = null, lastStatusB = null;
-
-// ── Chart setup ───────────────────────────────────────────────────────────────
-const ctx = document.getElementById('loadChart').getContext('2d');
-const loadChart = new Chart(ctx, {
+// ── Chart ──────────────────────────────────────────────────────────────
+const chartCtx = document.getElementById('chartLoad').getContext('2d');
+const labels = [], dA = [], dB = [];
+const chart = new Chart(chartCtx, {
   type: 'line',
   data: {
-    labels: [],
+    labels,
     datasets: [
-      {
-        label: 'Controller A',
-        data: [], borderColor: '#58a6ff', backgroundColor: '#58a6ff22',
-        tension: 0.3, fill: true, pointRadius: 2,
-      },
-      {
-        label: 'Controller B',
-        data: [], borderColor: '#bc8cff', backgroundColor: '#bc8cff22',
-        tension: 0.3, fill: true, pointRadius: 2,
-      },
-      {
-        label: 'CT Threshold',
-        data: [], borderColor: '#d29922', backgroundColor: 'transparent',
-        borderDash: [6, 4], pointRadius: 0, tension: 0,
-      },
+      { label: 'Controller A', data: dA, borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.07)', tension: 0.3, pointRadius: 0, fill: true, borderWidth: 2 },
+      { label: 'Controller B', data: dB, borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.07)', tension: 0.3, pointRadius: 0, fill: true, borderWidth: 2 },
     ]
   },
   options: {
-    responsive: true, maintainAspectRatio: false,
-    animation: { duration: 400 },
+    animation: false, responsive: true,
     scales: {
-      x: { ticks: { color: '#8b949e', maxTicksLimit: 10 },
-           grid: { color: '#21262d' } },
-      y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' },
-           beginAtZero: true, title: { display: true, text: 'Load (pkt/s)', color: '#8b949e' } }
+      x: { ticks: { color: '#484f58', maxTicksLimit: 8, font: { size: 11 } }, grid: { color: '#21262d' } },
+      y: { ticks: { color: '#484f58', font: { size: 11 } }, grid: { color: '#21262d' }, beginAtZero: true,
+           title: { display: true, text: 'C_Load', color: '#484f58', font: { size: 11 } } }
     },
-    plugins: {
-      legend: { labels: { color: '#e6edf3', boxWidth: 14 } },
-      tooltip: { mode: 'index', intersect: false }
-    }
+    plugins: { legend: { labels: { color: '#8b949e', boxWidth: 12, font: { size: 12 } } } }
   }
 });
 
-// ── Fetch helpers ─────────────────────────────────────────────────────────────
-async function fetchJson(url) {
-  const r = await fetch(url, { cache: 'no-store' });
-  if (!r.ok) throw new Error(`${r.status}`);
-  return r.json();
+function pushChart(la, lb) {
+  const t = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  labels.push(t); dA.push(la); dB.push(lb);
+  if (labels.length > MAX_PTS) { labels.shift(); dA.shift(); dB.shift(); }
+  chart.update('none');
 }
 
-// ── Update UI ─────────────────────────────────────────────────────────────────
-function fmtUptime(s) {
-  const m = Math.floor(s / 60), sec = s % 60;
-  return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
-}
+// ── Helpers ─────────────────────────────────────────────────────────────
+function $(id) { return document.getElementById(id); }
+function txt(id, v) { $(id).textContent = v; }
 
-function updateCtrlCard(key, data) {
-  const load   = data.total_load ?? 0;
-  const ct     = data.ct ?? 1000;
-  const status = data.status ?? 'NORMAL';
-  const pct    = Math.min(100, (load / (ct * 1.5)) * 100);
+function loadCls(pct) { return pct >= 80 ? 'hi' : pct >= 50 ? 'warn' : 'ok'; }
+function loadBarColor(pct) { return pct >= 80 ? '#f85149' : pct >= 50 ? '#f0883e' : '#3fb950'; }
 
-  document.getElementById(`load-${key}`).textContent = load.toFixed(1);
-  document.getElementById(`ct-${key}`).textContent   = ct.toFixed(0);
-  document.getElementById(`mc-${key}`).textContent   = data.migration_count ?? 0;
-  document.getElementById(`up-${key}`).textContent   = fmtUptime(data.uptime_seconds ?? 0);
-  document.getElementById(`rho-${key}`).textContent  = (data.rho ?? 1).toFixed(3);
+// ── Per-controller update ────────────────────────────────────────────────
+function updateCtrl(c, status, load) {
+  const cl = c.toLowerCase();
 
-  const badge = document.getElementById(`status-${key}`);
-  badge.textContent = status;
-  badge.className   = `status-badge ${status}`;
+  // Online badge
+  $('badge-' + cl).textContent = 'ONLINE';
+  $('badge-' + cl).className = 'badge online';
+  const sb = $('sbadge-' + cl);
+  sb.style.display = '';
+  sb.textContent = status.status || 'NORMAL';
+  sb.className = 'badge ' + (status.status === 'OVERLOADED' ? 'overloaded' : 'normal');
 
-  const card = document.getElementById(`card-${key}`);
-  card.className = `ctrl-card ${status === 'NORMAL' ? 'normal' : 'overloaded'}`;
-
-  const bar = document.getElementById(`bar-${key}`);
+  // Load bar
+  const total = status.total_load ?? 0;
+  const ct = status.ct ?? 1000;
+  const pct = Math.min(100, (total / ct) * 100);
+  const cls = loadCls(pct);
+  const loadEl = $('load-' + cl);
+  loadEl.textContent = total.toFixed(1);
+  loadEl.className = cls;
+  const bar = $('bar-' + cl);
   bar.style.width = pct + '%';
-  bar.className   = 'load-bar' + (pct > 80 ? ' crit' : pct > 60 ? ' warn' : '');
+  bar.style.background = loadBarColor(pct);
 
-  const pillBox = document.getElementById(`switches-${key}`);
-  pillBox.innerHTML = (data.managed_switches ?? [])
-    .map(s => `<span class="pill">${s}</span>`).join('');
-}
+  // Metrics
+  txt('sw-' + cl, (status.managed_switches || []).join(', ') || '(none)');
+  txt('mc-' + cl, status.migration_count ?? '0');
+  txt('ct-' + cl, ct);
 
-function updateRho(loadA, loadB) {
-  const vals = [loadA, loadB].filter(v => v >= 0);
-  if (vals.length === 0) return;
-  const mean = vals.reduce((a,b)=>a+b,0) / vals.length;
-  const max  = Math.max(...vals);
-  const rho  = max === 0 ? 1 : mean / max;
+  const pl = status.peer_load;
+  txt('peer-load-' + cl, pl != null ? pl.toFixed(1) : '—');
+  const pst = status.peer_status || 'OFFLINE';
+  $('peer-st-' + cl).textContent = pst;
+  $('peer-st-' + cl).className = pst === 'ONLINE' ? 'ok' : 'hi';
 
-  document.getElementById('rho-global').textContent = rho.toFixed(3);
-  const bar = document.getElementById('rho-bar');
-  bar.style.width      = (rho * 100) + '%';
-  bar.style.background = rho >= 0.7 ? 'var(--green)' : rho >= 0.5 ? 'var(--yellow)' : 'var(--red)';
+  // Uptime
+  const up = status.uptime_seconds;
+  if (up != null) {
+    txt('uptime-' + cl, `up ${Math.floor(up/60)}m${up%60}s`);
+  }
 
-  const verdict = document.getElementById('rho-verdict');
-  if (rho >= 0.7) {
-    verdict.textContent = '✅ Balanced';
-    verdict.style.color = 'var(--green)';
-  } else if (rho >= 0.5) {
-    verdict.textContent = '⚠ Imbalanced';
-    verdict.style.color = 'var(--yellow)';
+  // Switch table
+  const tbody = $('tbl-' + cl);
+  const sws = (load && load.switches) ? load.switches : [];
+  if (!sws.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="no-data">No switches connected</td></tr>';
   } else {
-    verdict.textContent = '🔴 Migration needed';
-    verdict.style.color = 'var(--red)';
+    tbody.innerHTML = sws.map(sw => {
+      const sp = Math.min(100, ((sw.load || 0) / ct) * 100);
+      return `<tr>
+        <td><b>${sw.name}</b></td>
+        <td>${sw.flows ?? 0}</td>
+        <td>${(sw.rtt_ms || 0).toFixed(1)}</td>
+        <td class="${loadCls(sp)}">${(sw.load || 0).toFixed(1)}</td>
+      </tr>`;
+    }).join('');
   }
 }
 
-function updateChart(time, loadA, loadB, ct) {
-  history.labels.push(time);
-  history.A.push(loadA);
-  history.B.push(loadB);
-  if (history.labels.length > MAX_HISTORY) {
-    history.labels.shift(); history.A.shift(); history.B.shift();
-  }
-  loadChart.data.labels               = [...history.labels];
-  loadChart.data.datasets[0].data     = [...history.A];
-  loadChart.data.datasets[1].data     = [...history.B];
-  loadChart.data.datasets[2].data     = history.labels.map(() => ct);
-  loadChart.update('none');
+function setOffline(c) {
+  const cl = c.toLowerCase();
+  $('badge-' + cl).textContent = 'OFFLINE';
+  $('badge-' + cl).className = 'badge offline';
+  $('sbadge-' + cl).style.display = 'none';
+  txt('load-' + cl, '—');
+  $('bar-' + cl).style.width = '0%';
+  txt('sw-' + cl, '—');
+  txt('mc-' + cl, '—');
+  txt('ct-' + cl, '—');
+  txt('peer-load-' + cl, '—');
+  txt('peer-st-' + cl, '—');
+  txt('uptime-' + cl, '');
+  $('tbl-' + cl).innerHTML = '<tr><td colspan="4" class="no-data">Controller OFFLINE — check terminal</td></tr>';
 }
 
-function updateSwitchTable(dataA, dataB) {
-  const rows = [];
-  for (const sw of (dataA.switches ?? [])) {
-    rows.push(`<tr>
-      <td>${sw.name}</td>
-      <td><span class="ctrl-tag A">A</span></td>
-      <td>${sw.flows}</td>
-      <td>${(sw.load / 0.8).toFixed(1)}</td>
-      <td>${sw.rtt_ms.toFixed(1)}</td>
-      <td style="color:var(--blue);font-weight:600">${sw.load.toFixed(2)}</td>
-    </tr>`);
+function updateRho(sa, sb) {
+  const la = sa ? (sa.total_load ?? 0) : null;
+  const lb = sb ? (sb.total_load ?? 0) : null;
+  let rho = null;
+  if (la !== null && lb !== null) {
+    const mx = Math.max(la, lb);
+    rho = mx === 0 ? 1.0 : ((la + lb) / 2) / mx;
+  } else if (la !== null || lb !== null) {
+    rho = 1.0;
   }
-  for (const sw of (dataB.switches ?? [])) {
-    rows.push(`<tr>
-      <td>${sw.name}</td>
-      <td><span class="ctrl-tag B">B</span></td>
-      <td>${sw.flows}</td>
-      <td>${(sw.load / 0.8).toFixed(1)}</td>
-      <td>${sw.rtt_ms.toFixed(1)}</td>
-      <td style="color:var(--purple);font-weight:600">${sw.load.toFixed(2)}</td>
-    </tr>`);
+  const rhoEl = $('rho-val');
+  if (rho === null) {
+    rhoEl.textContent = '—';
+    $('rho-bar').style.width = '0%';
+    return;
   }
-  const tbody = document.getElementById('switch-table-body');
-  tbody.innerHTML = rows.length
-    ? rows.join('')
-    : '<tr><td colspan="6" style="color:var(--muted);text-align:center">No switches connected</td></tr>';
+  rhoEl.textContent = rho.toFixed(3);
+  rhoEl.className = 'rho-val ' + (rho >= 0.7 ? 'ok' : 'hi');
+  const rhoBar = $('rho-bar');
+  rhoBar.style.width = (rho * 100) + '%';
+  rhoBar.style.background = rho >= 0.7 ? '#3fb950' : '#f85149';
+  $('rho-desc').textContent = rho >= 0.7
+    ? `ρ = ${rho.toFixed(3)} ≥ 0.7  →  BALANCED ✓ (no migration needed)`
+    : `ρ = ${rho.toFixed(3)} < 0.7  →  IMBALANCED ✗ (migration conditions may be met)`;
+  $('rho-desc').style.color = rho >= 0.7 ? '#3fb950' : '#f0883e';
 }
 
-function checkMigrations(statusA, statusB) {
-  const mcA = statusA?.migration_count ?? 0;
-  const mcB = statusB?.migration_count ?? 0;
-
-  if (mcA > prevMigrations.A) {
-    addMigrationLog(`Controller A received a switch (total migrations: ${mcA})`);
-    prevMigrations.A = mcA;
+function updateMigLog(sa, sb) {
+  const all = [];
+  (sa?.migration_log || []).forEach(e => all.push(e));
+  (sb?.migration_log || []).forEach(e => all.push(e));
+  const logEl = $('mig-log');
+  if (!all.length) {
+    logEl.innerHTML = '<p class="no-data">No migration events yet. Generate heavy traffic to trigger migration.</p>';
+    return;
   }
-  if (mcB > prevMigrations.B) {
-    addMigrationLog(`Controller B migrated a switch → A (total migrations: ${mcB})`);
-    prevMigrations.B = mcB;
-  }
+  logEl.innerHTML = all.slice(-20).reverse().map(e =>
+    `<div class="log-entry">
+      <span class="ts">${e.time}</span>
+      <span class="msg">Switch <b>${e.switch}</b> migrated: Controller <b>${e.from}</b> → Controller <b>${e.to}</b></span>
+    </div>`
+  ).join('');
 }
 
-function addMigrationLog(msg) {
-  const log  = document.getElementById('migration-log');
-  const now  = new Date().toLocaleTimeString();
-  const entry = document.createElement('div');
-  entry.className = 'log-entry';
-  entry.innerHTML = `<span class="log-time">${now}</span><span class="log-msg">✅ ${msg}</span>`;
-  // Remove "no migrations" placeholder
-  if (log.children.length === 1 && log.children[0].querySelector('.log-time')?.textContent === '—') {
-    log.innerHTML = '';
-  }
-  log.prepend(entry);
-}
-
-// ── Main poll loop ────────────────────────────────────────────────────────────
-async function refresh() {
-  const dot  = document.getElementById('refresh-dot');
-  const text = document.getElementById('refresh-text');
-  dot.classList.add('pulse');
-
+// ── Fetch + refresh ──────────────────────────────────────────────────────
+async function get(url) {
   try {
-    const [statusA, statusB, loadA, loadB] = await Promise.all([
-      fetchJson(`${CTRL_A}/status`),
-      fetchJson(`${CTRL_B}/status`),
-      fetchJson(`${CTRL_A}/load`),
-      fetchJson(`${CTRL_B}/load`),
-    ]);
+    const r = await fetch(url, { signal: AbortSignal.timeout(2500) });
+    return r.ok ? r.json() : null;
+  } catch { return null; }
+}
 
-    document.getElementById('error-banner').style.display = 'none';
-    dot.className = 'dot pulse';
+async function refresh() {
+  const [sa, la, sb, lb] = await Promise.all([
+    get(API.A + '/status'), get(API.A + '/load'),
+    get(API.B + '/status'), get(API.B + '/load'),
+  ]);
 
-    updateCtrlCard('A', statusA);
-    updateCtrlCard('B', statusB);
-    updateRho(statusA.total_load, statusB.total_load);
-    updateChart(
-      new Date().toLocaleTimeString(),
-      statusA.total_load, statusB.total_load,
-      Math.max(statusA.ct, statusB.ct)
-    );
-    updateSwitchTable(loadA, loadB);
-    checkMigrations(statusA, statusB);
+  sa ? updateCtrl('A', sa, la) : setOffline('A');
+  sb ? updateCtrl('B', sb, lb) : setOffline('B');
 
-    lastStatusA = statusA; lastStatusB = statusB;
-    text.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+  updateRho(sa, sb);
+  updateMigLog(sa, sb);
+  pushChart(sa ? (sa.total_load ?? 0) : null, sb ? (sb.total_load ?? 0) : null);
 
-  } catch (err) {
-    document.getElementById('error-banner').style.display = 'block';
-    dot.className = 'dot red';
-    text.textContent = 'Connection error';
-  }
+  $('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString('vi-VN');
 }
 
 refresh();
-setInterval(refresh, REFRESH_MS);
+setInterval(refresh, 3000);
 </script>
 </body>
 </html>

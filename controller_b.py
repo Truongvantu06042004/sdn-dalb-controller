@@ -38,6 +38,14 @@ CONFIG = {
 
 NAME = CONFIG['CONTROLLER_NAME']
 
+# Force Ryu WSGI to bind on our configured port instead of the default 8080
+try:
+    from ryu import cfg as _ryu_cfg
+    _ryu_cfg.CONF.wsapi_port = CONFIG['REST_PORT']
+    _ryu_cfg.CONF.wsapi_host = '0.0.0.0'
+except Exception:
+    pass
+
 
 def _ts():
     return time.strftime('%H:%M:%S')
@@ -70,6 +78,7 @@ class DALBController(app_manager.RyuApp):
 
         self.ct = float(CONFIG['CT_INITIAL'])
         self.inter_domain_ports = dict(CONFIG['INTER_DOMAIN_PORTS'])
+        self.migration_log = []
 
         self.monitor_thread = hub.spawn(self._monitor_loop)
 
@@ -485,6 +494,10 @@ class DALBController(app_manager.RyuApp):
             self.datapaths.pop(dpid, None)
             self.switch_names.pop(dpid, None)
             self.migration_count += 1
+            self.migration_log.append({
+                'time': _ts(), 'switch': name,
+                'from': NAME, 'to': target_name,
+            })
 
     def accept_switch(self, dpid, name):
         with self.lock:
@@ -534,19 +547,34 @@ class DALBController(app_manager.RyuApp):
     def get_status_data(self):
         metrics = self._switch_metrics()
         total   = self.dalb.calculate_controller_load([m['load'] for m in metrics])
-        rho     = self.dalb.calculate_rho([total])
+        peer_load = None
+        peer_status = 'OFFLINE'
+        try:
+            r = requests.get(f'{CONFIG["PEER_REST_URL"]}/load', timeout=2)
+            if r.status_code == 200:
+                d = r.json()
+                peer_load   = d.get('total_load', 0.0)
+                peer_status = 'ONLINE'
+        except requests.exceptions.RequestException:
+            pass
+        load_values = [total, peer_load] if peer_load is not None else [total]
+        rho = self.dalb.calculate_rho(load_values)
         with self.lock:
             managed = sorted(self.switch_names.get(d, f'S{d}')
                              for d in self.datapaths)
-            mc = self.migration_count
+            mc  = self.migration_count
+            log = list(self.migration_log[-20:])
         return {
             'controller'      : NAME,
             'total_load'      : round(total, 2),
+            'peer_load'       : round(peer_load, 2) if peer_load is not None else None,
+            'peer_status'     : peer_status,
             'ct'              : self.ct,
             'rho'             : round(rho, 3),
             'status'          : 'NORMAL' if total < self.ct else 'OVERLOADED',
             'managed_switches': managed,
             'migration_count' : mc,
+            'migration_log'   : log,
             'uptime_seconds'  : int(time.time() - self.start_time),
         }
 
