@@ -1,326 +1,435 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SDN DALB Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d1117;color:#c9d1d9;font-family:'Segoe UI',monospace;font-size:14px}
-h1{text-align:center;padding:16px 0 4px;color:#58a6ff;font-size:20px;letter-spacing:1px}
-.subtitle{text-align:center;color:#8b949e;font-size:12px;margin-bottom:16px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px 16px}
-.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px}
-.card h2{font-size:13px;color:#8b949e;text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;border-bottom:1px solid #21262d;padding-bottom:6px}
-.status-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.badge{padding:2px 8px;border-radius:12px;font-size:11px;font-weight:bold}
-.badge.online{background:#1a3a1a;color:#3fb950;border:1px solid #3fb950}
-.badge.offline{background:#3a1a1a;color:#f85149;border:1px solid #f85149}
-.badge.normal{background:#1a2a3a;color:#58a6ff;border:1px solid #58a6ff}
-.badge.overloaded{background:#3a1a00;color:#f0883e;border:1px solid #f0883e}
-.metric{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #21262d}
-.metric:last-child{border-bottom:none}
-.metric label{color:#8b949e;font-size:12px}
-.metric value{font-size:15px;font-weight:bold;color:#e6edf3}
-.hi{color:#f85149!important}
-.ok{color:#3fb950!important}
-.warn{color:#f0883e!important}
-.bar-wrap{height:10px;background:#21262d;border-radius:5px;overflow:hidden;margin-top:4px}
-.bar{height:100%;border-radius:5px;transition:width .5s}
+body{background:#12121f;color:#e0e0f0;font-family:'Segoe UI',sans-serif;font-size:13px}
+
+/* ── Header ── */
+header{text-align:center;padding:14px 0 4px}
+header h1{color:#4fc3f7;font-size:20px;letter-spacing:1px;font-weight:700}
+header p{color:#6a6a8a;font-size:12px;margin-top:3px}
+
+/* ── Layout ── */
+.page{padding:10px 16px 20px;display:flex;flex-direction:column;gap:10px}
+.row{display:grid;gap:10px}
+.row-2{grid-template-columns:1fr 1fr}
+.row-chart{grid-template-columns:3fr 2fr}
+
+/* ── Card ── */
+.card{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:12px}
+.card-title{font-size:11px;color:#6a6a8a;text-transform:uppercase;letter-spacing:.8px;
+            border-bottom:1px solid #2a2a4a;padding-bottom:6px;margin-bottom:10px}
+
+/* ── Badge ── */
+.badge{display:inline-block;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700}
+.b-online {background:#0d2e0d;color:#66bb6a;border:1px solid #66bb6a}
+.b-offline{background:#2e0d0d;color:#ef5350;border:1px solid #ef5350}
+.b-normal {background:#0d1f2e;color:#4fc3f7;border:1px solid #4fc3f7}
+.b-overloaded{background:#2e1a0d;color:#ffa726;border:1px solid #ffa726}
+
+/* ── Metric row ── */
+.m{display:flex;justify-content:space-between;align-items:center;
+   padding:4px 0;border-bottom:1px solid #1e1e30}
+.m:last-child{border-bottom:none}
+.m label{color:#6a6a8a;font-size:12px}
+.m value{font-weight:700;font-size:14px;color:#e8e8f8}
+.ok{color:#66bb6a!important} .hi{color:#ef5350!important} .warn{color:#ffa726!important}
+
+/* ── Load bar ── */
+.bar-track{height:8px;background:#1e1e30;border-radius:4px;overflow:hidden;margin:4px 0 8px}
+.bar-fill{height:100%;border-radius:4px;transition:width .5s}
+
+/* ── Switch table ── */
 table{width:100%;border-collapse:collapse;font-size:12px}
-th{background:#21262d;color:#8b949e;padding:6px 8px;text-align:left;font-weight:normal}
-td{padding:5px 8px;border-bottom:1px solid #21262d;color:#e6edf3}
-tr:hover td{background:#1c2128}
-.rho-gauge{display:flex;align-items:center;gap:12px;margin-top:8px}
-.rho-val{font-size:32px;font-weight:bold;min-width:70px}
-.rho-bar-wrap{flex:1;position:relative}
-.rho-bar-bg{height:16px;background:#21262d;border-radius:8px;overflow:hidden}
-.rho-bar{height:100%;border-radius:8px;transition:width .6s}
-.rho-threshold{position:absolute;top:-3px;height:22px;width:2px;background:#f85149;border-radius:1px}
-.rho-label{font-size:11px;color:#8b949e;margin-top:4px;display:flex;justify-content:space-between}
-.full{grid-column:1/3}
-.log-entry{padding:5px 8px;border-bottom:1px solid #21262d;font-size:12px;display:flex;gap:10px;align-items:baseline}
-.log-entry .ts{color:#8b949e;min-width:72px;flex-shrink:0}
-.log-entry .msg{color:#e6edf3}
-#last-update{text-align:center;color:#484f58;font-size:11px;padding:6px}
-.no-data{color:#484f58;font-style:italic;padding:8px;text-align:center}
-.section-title{color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:.8px;margin:10px 0 4px}
+th{background:#1e1e30;color:#6a6a8a;padding:5px 8px;text-align:left;font-weight:500}
+td{padding:4px 8px;border-bottom:1px solid #1e1e30;color:#e0e0f0}
+tr:hover td{background:#20203a}
+
+/* ── ρ gauge ── */
+.rho-big{font-size:38px;font-weight:700;text-align:center;padding:6px 0}
+.rho-track{height:14px;background:#1e1e30;border-radius:7px;overflow:hidden;position:relative}
+.rho-fill{height:100%;border-radius:7px;transition:width .6s}
+.rho-tick{position:absolute;top:-2px;height:18px;width:2px;background:#ef5350;left:70%}
+.rho-labels{display:flex;justify-content:space-between;
+            color:#6a6a8a;font-size:10px;margin-top:3px}
+.rho-status{text-align:center;font-size:12px;margin-top:8px;font-weight:600}
+
+/* ── Log ── */
+.log-item{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #1e1e30;font-size:12px}
+.log-item .ts{color:#6a6a8a;min-width:76px;flex-shrink:0}
+.log-item .detail{color:#e0e0f0}
+.no-data{color:#4a4a6a;font-style:italic;padding:10px;text-align:center}
+#footer{text-align:center;color:#3a3a5a;font-size:11px;padding:6px}
 </style>
 </head>
 <body>
 
-<h1>SDN DALB — Real-time Dashboard</h1>
-<p class="subtitle">Dynamic &amp; Adaptive Load Balancing | 2 Controllers | 5 Switches | 11 Hosts | Refresh every 3s</p>
+<header>
+  <h1>SDN DALB — Real-time Scientific Dashboard</h1>
+  <p>Dynamic &amp; Adaptive Load Balancing &nbsp;|&nbsp;
+     2 Controllers &nbsp;·&nbsp; 5 Switches &nbsp;·&nbsp; 11 Hosts &nbsp;|&nbsp;
+     Refresh every 3 s</p>
+</header>
 
-<div class="grid">
+<div class="page">
 
-  <!-- ── Controller A ─────────────────────────────────── -->
-  <div class="card">
-    <h2>Controller A &nbsp;<span style="float:right;font-size:11px;font-weight:normal" id="uptime-a"></span></h2>
-    <div class="status-row">
-      <span class="badge offline" id="badge-a">OFFLINE</span>
-      <span class="badge normal" id="sbadge-a" style="display:none">NORMAL</span>
-    </div>
-    <div class="metric"><label>Total Load (C_Load)</label><value id="load-a">—</value></div>
-    <div class="bar-wrap"><div class="bar" id="bar-a" style="width:0%;background:#3fb950"></div></div>
-    <div class="metric" style="margin-top:8px"><label>Managed Switches</label><value id="sw-a" style="font-size:13px">—</value></div>
-    <div class="metric"><label>Migrations Out</label><value id="mc-a">—</value></div>
-    <div class="metric"><label>CT Threshold</label><value id="ct-a">—</value></div>
-    <div class="metric"><label>Peer (B) Load</label><value id="peer-load-a">—</value></div>
-    <div class="metric"><label>Peer (B) Status</label><value id="peer-st-a">—</value></div>
-    <p class="section-title">Per-Switch Details</p>
-    <table>
-      <thead><tr><th>Switch</th><th>Flows</th><th>RTT (ms)</th><th>C_Load</th></tr></thead>
-      <tbody id="tbl-a"><tr><td colspan="4" class="no-data">Waiting...</td></tr></tbody>
-    </table>
-  </div>
+  <!-- ── Row 1: Controller cards ──────────────────────────────────────── -->
+  <div class="row row-2">
 
-  <!-- ── Controller B ─────────────────────────────────── -->
-  <div class="card">
-    <h2>Controller B &nbsp;<span style="float:right;font-size:11px;font-weight:normal" id="uptime-b"></span></h2>
-    <div class="status-row">
-      <span class="badge offline" id="badge-b">OFFLINE</span>
-      <span class="badge normal" id="sbadge-b" style="display:none">NORMAL</span>
-    </div>
-    <div class="metric"><label>Total Load (C_Load)</label><value id="load-b">—</value></div>
-    <div class="bar-wrap"><div class="bar" id="bar-b" style="width:0%;background:#3fb950"></div></div>
-    <div class="metric" style="margin-top:8px"><label>Managed Switches</label><value id="sw-b" style="font-size:13px">—</value></div>
-    <div class="metric"><label>Migrations Out</label><value id="mc-b">—</value></div>
-    <div class="metric"><label>CT Threshold</label><value id="ct-b">—</value></div>
-    <div class="metric"><label>Peer (A) Load</label><value id="peer-load-b">—</value></div>
-    <div class="metric"><label>Peer (A) Status</label><value id="peer-st-b">—</value></div>
-    <p class="section-title">Per-Switch Details</p>
-    <table>
-      <thead><tr><th>Switch</th><th>Flows</th><th>RTT (ms)</th><th>C_Load</th></tr></thead>
-      <tbody id="tbl-b"><tr><td colspan="4" class="no-data">Waiting...</td></tr></tbody>
-    </table>
-  </div>
-
-  <!-- ── Balance Index (rho) ──────────────────────────── -->
-  <div class="card full">
-    <h2>Balance Index — ρ (rho) = mean(loads) / max(loads)</h2>
-    <div class="rho-gauge">
-      <div class="rho-val ok" id="rho-val">—</div>
-      <div class="rho-bar-wrap">
-        <div class="rho-bar-bg">
-          <div class="rho-bar" id="rho-bar" style="width:0%;background:#3fb950"></div>
-        </div>
-        <div class="rho-threshold" style="left:70%"></div>
-        <div class="rho-label">
-          <span>0.0 (fully imbalanced)</span>
-          <span style="color:#f85149">▲ 0.7 threshold</span>
-          <span>1.0 (perfectly balanced)</span>
-        </div>
+    <div class="card" id="card-a">
+      <div class="card-title" style="display:flex;justify-content:space-between">
+        <span>Controller A &nbsp;<span id="badge-a" class="badge b-offline">OFFLINE</span>
+              &nbsp;<span id="sbadge-a" class="badge" style="display:none"></span></span>
+        <span id="uptime-a" style="color:#4a4a6a;font-size:11px"></span>
       </div>
+      <div class="m"><label>Total Load (C_Load)</label><value id="load-a" class="hi">—</value></div>
+      <div class="bar-track"><div class="bar-fill" id="bar-a" style="width:0%;background:#66bb6a"></div></div>
+      <div class="m"><label>Managed Switches</label><value id="sw-a" style="font-size:12px">—</value></div>
+      <div class="m"><label>CT Threshold</label><value id="ct-a">—</value></div>
+      <div class="m"><label>Migrations Out</label><value id="mc-a">—</value></div>
+      <div class="m"><label>Peer (B) Load / Status</label>
+        <value><span id="peer-a">—</span></value></div>
+      <br>
+      <p style="color:#6a6a8a;font-size:11px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">
+        Per-Switch Detail</p>
+      <table>
+        <thead><tr><th>Switch</th><th>Flows (N)</th><th>Rate (F) /s</th><th>RTT (R) ms</th><th>C_Load</th></tr></thead>
+        <tbody id="tbl-a"><tr><td colspan="5" class="no-data">Waiting…</td></tr></tbody>
+      </table>
     </div>
-    <p id="rho-desc" style="margin-top:10px;font-size:12px;color:#8b949e">
-      ρ ≥ 0.7: system balanced &nbsp;|&nbsp; ρ &lt; 0.7: imbalanced → migration may trigger
-    </p>
+
+    <div class="card" id="card-b">
+      <div class="card-title" style="display:flex;justify-content:space-between">
+        <span>Controller B &nbsp;<span id="badge-b" class="badge b-offline">OFFLINE</span>
+              &nbsp;<span id="sbadge-b" class="badge" style="display:none"></span></span>
+        <span id="uptime-b" style="color:#4a4a6a;font-size:11px"></span>
+      </div>
+      <div class="m"><label>Total Load (C_Load)</label><value id="load-b" class="hi">—</value></div>
+      <div class="bar-track"><div class="bar-fill" id="bar-b" style="width:0%;background:#66bb6a"></div></div>
+      <div class="m"><label>Managed Switches</label><value id="sw-b" style="font-size:12px">—</value></div>
+      <div class="m"><label>CT Threshold</label><value id="ct-b">—</value></div>
+      <div class="m"><label>Migrations Out</label><value id="mc-b">—</value></div>
+      <div class="m"><label>Peer (A) Load / Status</label>
+        <value><span id="peer-b">—</span></value></div>
+      <br>
+      <p style="color:#6a6a8a;font-size:11px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">
+        Per-Switch Detail</p>
+      <table>
+        <thead><tr><th>Switch</th><th>Flows (N)</th><th>Rate (F) /s</th><th>RTT (R) ms</th><th>C_Load</th></tr></thead>
+        <tbody id="tbl-b"><tr><td colspan="5" class="no-data">Waiting…</td></tr></tbody>
+      </table>
+    </div>
+
+  </div><!-- /row-2 -->
+
+  <!-- ── Row 2: Charts ─────────────────────────────────────────────────── -->
+  <div class="row row-chart">
+
+    <!-- Load history (like Fig.6 in paper) -->
+    <div class="card">
+      <div class="card-title">
+        Average Packet-in Arrival Rate over Time
+        <span style="float:right;font-weight:normal;color:#4a4a6a" id="ct-label"></span>
+      </div>
+      <canvas id="chartLoad" height="110"></canvas>
+    </div>
+
+    <!-- ρ history -->
+    <div class="card">
+      <div class="card-title">Load Balance Index ρ over Time</div>
+      <canvas id="chartRho" height="110"></canvas>
+    </div>
+
+  </div><!-- /row-chart -->
+
+  <!-- ── Row 3: ρ gauge + Migration log ────────────────────────────────── -->
+  <div class="row row-2">
+
+    <div class="card">
+      <div class="card-title">Balance Index ρ = mean(L) / max(L)</div>
+      <div class="rho-big ok" id="rho-val">—</div>
+      <div class="rho-track">
+        <div class="rho-fill" id="rho-fill" style="width:0%;background:#66bb6a"></div>
+        <div class="rho-tick"></div>
+      </div>
+      <div class="rho-labels">
+        <span>0.0 (imbalanced)</span>
+        <span style="color:#ef5350">▲ 0.7 threshold</span>
+        <span>1.0 (balanced)</span>
+      </div>
+      <div class="rho-status" id="rho-desc" style="color:#6a6a8a">—</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Migration Log</div>
+      <div id="mig-log"><p class="no-data">No migration events yet.<br>
+        Generate heavy traffic via iperf to trigger migration.</p></div>
+    </div>
+
   </div>
 
-  <!-- ── Load History Chart ───────────────────────────── -->
-  <div class="card full">
-    <h2>Load History (last 3 minutes)</h2>
-    <canvas id="chartLoad" height="80"></canvas>
-  </div>
+</div><!-- /page -->
 
-  <!-- ── Migration Log ────────────────────────────────── -->
-  <div class="card full">
-    <h2>Migration Log</h2>
-    <div id="mig-log"><p class="no-data">No migration events yet.</p></div>
-  </div>
+<div id="footer">Connecting…</div>
 
-</div>
-
-<div id="last-update">Connecting to controllers...</div>
-
+<!-- ── JavaScript ───────────────────────────────────────────────────────── -->
 <script>
 const API = { A: 'http://localhost:8080', B: 'http://localhost:8081' };
-const MAX_PTS = 60;
+const MAX_PTS  = 80;
+const t0       = Date.now();       // page-load epoch (for elapsed seconds)
+let   ct_ref   = 1000;
+let   prevMcA  = 0, prevMcB = 0;
+const migEvents = [];              // array of elapsed-second values where migration fired
 
-// ── Chart ──────────────────────────────────────────────────────────────
-const chartCtx = document.getElementById('chartLoad').getContext('2d');
-const labels = [], dA = [], dB = [];
-const chart = new Chart(chartCtx, {
+// ── Helpers ──────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const txt = (id, v) => $(id).textContent = v;
+
+function barColor(pct){ return pct>=80?'#ef5350':pct>=50?'#ffa726':'#66bb6a'; }
+function loadClass(pct){ return pct>=80?'hi':pct>=50?'warn':'ok'; }
+function elapsed(){ return Math.round((Date.now()-t0)/1000); }
+
+// ── Chart: Load history ───────────────────────────────────────────────────
+const loadLabels=[], dA=[], dB=[];
+const chartLoad = new Chart($('chartLoad').getContext('2d'), {
   type: 'line',
   data: {
-    labels,
+    labels: loadLabels,
     datasets: [
-      { label: 'Controller A', data: dA, borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.07)', tension: 0.3, pointRadius: 0, fill: true, borderWidth: 2 },
-      { label: 'Controller B', data: dB, borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.07)', tension: 0.3, pointRadius: 0, fill: true, borderWidth: 2 },
+      { label: 'Controller A', data: dA,
+        borderColor:'#4fc3f7', backgroundColor:'rgba(79,195,247,.08)',
+        tension:.3, pointRadius:2, pointHoverRadius:4, fill:true, borderWidth:2 },
+      { label: 'Controller B', data: dB,
+        borderColor:'#ef5350', backgroundColor:'rgba(239,83,80,.08)',
+        tension:.3, pointRadius:2, pointHoverRadius:4, fill:true, borderWidth:2 },
     ]
   },
-  options: {
-    animation: false, responsive: true,
-    scales: {
-      x: { ticks: { color: '#484f58', maxTicksLimit: 8, font: { size: 11 } }, grid: { color: '#21262d' } },
-      y: { ticks: { color: '#484f58', font: { size: 11 } }, grid: { color: '#21262d' }, beginAtZero: true,
-           title: { display: true, text: 'C_Load', color: '#484f58', font: { size: 11 } } }
+  options:{
+    animation:false, responsive:true, interaction:{mode:'index',intersect:false},
+    scales:{
+      x:{ title:{display:true,text:'Time (s)',color:'#6a6a8a',font:{size:11}},
+          ticks:{color:'#4a4a6a',maxTicksLimit:8,font:{size:10}},
+          grid:{color:'#22223a'} },
+      y:{ title:{display:true,text:'Arrival Rate (requests/s)',color:'#6a6a8a',font:{size:11}},
+          ticks:{color:'#4a4a6a',font:{size:10}},
+          grid:{color:'#22223a'}, beginAtZero:true }
     },
-    plugins: { legend: { labels: { color: '#8b949e', boxWidth: 12, font: { size: 12 } } } }
+    plugins:{
+      legend:{labels:{color:'#9a9aba',boxWidth:14,font:{size:11}}},
+      annotation:{annotations:{
+        ctLine:{
+          type:'line', yMin:ct_ref, yMax:ct_ref,
+          borderColor:'#ffa726', borderWidth:1.5, borderDash:[6,3],
+          label:{content:'CT='+ct_ref, display:true,
+                 position:'end', color:'#ffa726', font:{size:10},
+                 backgroundColor:'rgba(0,0,0,0)'}
+        }
+      }}
+    }
   }
 });
 
-function pushChart(la, lb) {
-  const t = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  labels.push(t); dA.push(la); dB.push(lb);
-  if (labels.length > MAX_PTS) { labels.shift(); dA.shift(); dB.shift(); }
-  chart.update('none');
+// ── Chart: ρ history ──────────────────────────────────────────────────────
+const rhoLabels=[], dRho=[];
+const chartRho = new Chart($('chartRho').getContext('2d'), {
+  type: 'line',
+  data:{
+    labels:rhoLabels,
+    datasets:[{
+      label:'ρ (Balance Index)', data:dRho,
+      borderColor:'#e0e0f0', backgroundColor:'rgba(224,224,240,.07)',
+      tension:.3, pointRadius:2, pointHoverRadius:4, fill:true, borderWidth:1.8
+    }]
+  },
+  options:{
+    animation:false, responsive:true,
+    scales:{
+      x:{ title:{display:true,text:'Time (s)',color:'#6a6a8a',font:{size:11}},
+          ticks:{color:'#4a4a6a',maxTicksLimit:8,font:{size:10}},
+          grid:{color:'#22223a'} },
+      y:{ title:{display:true,text:'ρ',color:'#6a6a8a',font:{size:11}},
+          ticks:{color:'#4a4a6a',font:{size:10}},
+          grid:{color:'#22223a'}, min:0, max:1.1,
+          afterDataLimits(scale){ scale.max=1.1; scale.min=0; } }
+    },
+    plugins:{
+      legend:{labels:{color:'#9a9aba',boxWidth:14,font:{size:11}}},
+      annotation:{annotations:{
+        threshold:{
+          type:'line', yMin:0.7, yMax:0.7,
+          borderColor:'#ef5350', borderWidth:1.5, borderDash:[6,3],
+          label:{content:'ρ = 0.7 threshold', display:true,
+                 position:'end', color:'#ef5350', font:{size:10},
+                 backgroundColor:'rgba(0,0,0,0)'}
+        }
+      }}
+    }
+  }
+});
+
+function updateCTAnnotation(ct){
+  chartLoad.options.plugins.annotation.annotations.ctLine.yMin = ct;
+  chartLoad.options.plugins.annotation.annotations.ctLine.yMax = ct;
+  chartLoad.options.plugins.annotation.annotations.ctLine.label.content = 'CT='+ct;
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────
-function $(id) { return document.getElementById(id); }
-function txt(id, v) { $(id).textContent = v; }
+function addMigrationAnnotation(t_s){
+  // vertical line on both charts at x = time label
+  const id = 'mig_'+t_s;
+  const ann = {
+    type:'line', xMin:t_s, xMax:t_s, scaleID:'x',
+    borderColor:'#ce93d8', borderWidth:1.5, borderDash:[4,3],
+    label:{content:'Migration', display:true, position:'start',
+           color:'#ce93d8', font:{size:9}, backgroundColor:'rgba(0,0,0,0)',
+           rotation:-90}
+  };
+  chartLoad.options.plugins.annotation.annotations[id] = ann;
+  chartRho.options.plugins.annotation.annotations[id]  = {...ann};
+}
 
-function loadCls(pct) { return pct >= 80 ? 'hi' : pct >= 50 ? 'warn' : 'ok'; }
-function loadBarColor(pct) { return pct >= 80 ? '#f85149' : pct >= 50 ? '#f0883e' : '#3fb950'; }
-
-// ── Per-controller update ────────────────────────────────────────────────
-function updateCtrl(c, status, load) {
-  const cl = c.toLowerCase();
-
-  // Online badge
-  $('badge-' + cl).textContent = 'ONLINE';
-  $('badge-' + cl).className = 'badge online';
-  const sb = $('sbadge-' + cl);
-  sb.style.display = '';
-  sb.textContent = status.status || 'NORMAL';
-  sb.className = 'badge ' + (status.status === 'OVERLOADED' ? 'overloaded' : 'normal');
-
-  // Load bar
-  const total = status.total_load ?? 0;
-  const ct = status.ct ?? 1000;
-  const pct = Math.min(100, (total / ct) * 100);
-  const cls = loadCls(pct);
-  const loadEl = $('load-' + cl);
-  loadEl.textContent = total.toFixed(1);
-  loadEl.className = cls;
-  const bar = $('bar-' + cl);
-  bar.style.width = pct + '%';
-  bar.style.background = loadBarColor(pct);
-
-  // Metrics
-  txt('sw-' + cl, (status.managed_switches || []).join(', ') || '(none)');
-  txt('mc-' + cl, status.migration_count ?? '0');
-  txt('ct-' + cl, ct);
-
-  const pl = status.peer_load;
-  txt('peer-load-' + cl, pl != null ? pl.toFixed(1) : '—');
-  const pst = status.peer_status || 'OFFLINE';
-  $('peer-st-' + cl).textContent = pst;
-  $('peer-st-' + cl).className = pst === 'ONLINE' ? 'ok' : 'hi';
-
-  // Uptime
-  const up = status.uptime_seconds;
-  if (up != null) {
-    txt('uptime-' + cl, `up ${Math.floor(up/60)}m${up%60}s`);
+// ── Push data points ──────────────────────────────────────────────────────
+function pushData(la, lb, rho){
+  const t = elapsed();
+  loadLabels.push(t); dA.push(la); dB.push(lb);
+  rhoLabels.push(t);  dRho.push(rho);
+  if(loadLabels.length > MAX_PTS){
+    loadLabels.shift(); dA.shift(); dB.shift();
+    rhoLabels.shift();  dRho.shift();
   }
+  chartLoad.update('none');
+  chartRho.update('none');
+}
+
+// ── Per-controller update ─────────────────────────────────────────────────
+function updateCtrl(c, status, load){
+  const L = c.toLowerCase();
+  const ct= status.ct ?? 1000;
+  if(ct && ct !== ct_ref){ ct_ref=ct; updateCTAnnotation(ct); $('ct-label').textContent='CT = '+ct; }
+
+  $('badge-'+L).textContent='ONLINE'; $('badge-'+L).className='badge b-online';
+  const sb = $('sbadge-'+L);
+  sb.style.display=''; sb.textContent=status.status||'NORMAL';
+  sb.className = 'badge '+(status.status==='OVERLOADED'?'b-overloaded':'b-normal');
+
+  const total = status.total_load??0;
+  const pct   = Math.min(100,(total/ct)*100);
+  const lEl   = $('load-'+L); lEl.textContent=total.toFixed(1); lEl.className=loadClass(pct);
+  const bf    = $('bar-'+L);  bf.style.width=pct+'%'; bf.style.background=barColor(pct);
+
+  txt('sw-'+L, (status.managed_switches||[]).join(', ')||'(none)');
+  txt('ct-'+L, ct);
+  txt('mc-'+L, status.migration_count??'0');
+
+  const pl=status.peer_load, ps=status.peer_status||'OFFLINE';
+  $('peer-'+L).textContent = (pl!=null?pl.toFixed(1):'—')+' / '+ps;
+  $('peer-'+L).className   = ps==='ONLINE'?'ok':'hi';
+
+  const up=status.uptime_seconds;
+  if(up!=null) txt('uptime-'+L,`up ${Math.floor(up/60)}m${up%60<10?'0':''}${up%60}s`);
 
   // Switch table
-  const tbody = $('tbl-' + cl);
-  const sws = (load && load.switches) ? load.switches : [];
-  if (!sws.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="no-data">No switches connected</td></tr>';
-  } else {
-    tbody.innerHTML = sws.map(sw => {
-      const sp = Math.min(100, ((sw.load || 0) / ct) * 100);
-      return `<tr>
-        <td><b>${sw.name}</b></td>
-        <td>${sw.flows ?? 0}</td>
-        <td>${(sw.rtt_ms || 0).toFixed(1)}</td>
-        <td class="${loadCls(sp)}">${(sw.load || 0).toFixed(1)}</td>
-      </tr>`;
-    }).join('');
+  const sws = (load?.switches)||[];
+  const tb  = $('tbl-'+L);
+  if(!sws.length){
+    tb.innerHTML='<tr><td colspan="5" class="no-data">No switches connected</td></tr>'; return;
   }
+  tb.innerHTML = sws.map(sw=>{
+    const sp=Math.min(100,((sw.load||0)/ct)*100);
+    return `<tr>
+      <td><b>${sw.name}</b></td>
+      <td>${sw.flows??0}</td>
+      <td>${(sw.rate??0).toFixed(1)}</td>
+      <td>${(sw.rtt_ms??0).toFixed(1)}</td>
+      <td class="${loadClass(sp)}">${(sw.load||0).toFixed(1)}</td>
+    </tr>`;
+  }).join('');
 }
 
-function setOffline(c) {
-  const cl = c.toLowerCase();
-  $('badge-' + cl).textContent = 'OFFLINE';
-  $('badge-' + cl).className = 'badge offline';
-  $('sbadge-' + cl).style.display = 'none';
-  txt('load-' + cl, '—');
-  $('bar-' + cl).style.width = '0%';
-  txt('sw-' + cl, '—');
-  txt('mc-' + cl, '—');
-  txt('ct-' + cl, '—');
-  txt('peer-load-' + cl, '—');
-  txt('peer-st-' + cl, '—');
-  txt('uptime-' + cl, '');
-  $('tbl-' + cl).innerHTML = '<tr><td colspan="4" class="no-data">Controller OFFLINE — check terminal</td></tr>';
+function setOffline(c){
+  const L=c.toLowerCase();
+  $('badge-'+L).textContent='OFFLINE'; $('badge-'+L).className='badge b-offline';
+  $('sbadge-'+L).style.display='none';
+  txt('load-'+L,'—'); $('bar-'+L).style.width='0%';
+  ['sw','ct','mc'].forEach(k=>txt(k+'-'+L,'—'));
+  $('peer-'+L).textContent='—'; txt('uptime-'+L,'');
+  $('tbl-'+L).innerHTML=`<tr><td colspan="5" class="no-data">
+    Controller OFFLINE — check terminal</td></tr>`;
 }
 
-function updateRho(sa, sb) {
-  const la = sa ? (sa.total_load ?? 0) : null;
-  const lb = sb ? (sb.total_load ?? 0) : null;
-  let rho = null;
-  if (la !== null && lb !== null) {
-    const mx = Math.max(la, lb);
-    rho = mx === 0 ? 1.0 : ((la + lb) / 2) / mx;
-  } else if (la !== null || lb !== null) {
-    rho = 1.0;
+function updateRho(sa, sb){
+  const la=sa?(sa.total_load??0):null, lb=sb?(sb.total_load??0):null;
+  if(la===null&&lb===null){ txt('rho-val','—'); return; }
+  const mx=Math.max(la??0,lb??0);
+  const rho= mx===0?1.0:((la??0)+(lb??0))/2/mx;
+  const el=$('rho-val'); el.textContent=rho.toFixed(3);
+  el.className='rho-big '+(rho>=0.7?'ok':'hi');
+  const rf=$('rho-fill'); rf.style.width=(rho*100)+'%'; rf.style.background=rho>=0.7?'#66bb6a':'#ef5350';
+  const rd=$('rho-desc');
+  rd.textContent = rho>=0.7
+    ?`ρ = ${rho.toFixed(3)} ≥ 0.7  →  BALANCED ✓  (no migration needed)`
+    :`ρ = ${rho.toFixed(3)} < 0.7  →  IMBALANCED ✗  (migration may trigger)`;
+  rd.style.color=rho>=0.7?'#66bb6a':'#ffa726';
+  return rho;
+}
+
+function updateMigLog(sa, sb){
+  // Detect new migration events
+  const mcA=sa?.migration_count??0, mcB=sb?.migration_count??0;
+  if(mcA>prevMcA||mcB>prevMcB){
+    const t=elapsed();
+    migEvents.push(t);
+    addMigrationAnnotation(t);
+    prevMcA=mcA; prevMcB=mcB;
   }
-  const rhoEl = $('rho-val');
-  if (rho === null) {
-    rhoEl.textContent = '—';
-    $('rho-bar').style.width = '0%';
+
+  const all=[...(sa?.migration_log||[]),...(sb?.migration_log||[])];
+  const el=$('mig-log');
+  if(!all.length){
+    el.innerHTML='<p class="no-data">No migration events yet.<br>Run iperf traffic to trigger migration.</p>';
     return;
   }
-  rhoEl.textContent = rho.toFixed(3);
-  rhoEl.className = 'rho-val ' + (rho >= 0.7 ? 'ok' : 'hi');
-  const rhoBar = $('rho-bar');
-  rhoBar.style.width = (rho * 100) + '%';
-  rhoBar.style.background = rho >= 0.7 ? '#3fb950' : '#f85149';
-  $('rho-desc').textContent = rho >= 0.7
-    ? `ρ = ${rho.toFixed(3)} ≥ 0.7  →  BALANCED ✓ (no migration needed)`
-    : `ρ = ${rho.toFixed(3)} < 0.7  →  IMBALANCED ✗ (migration conditions may be met)`;
-  $('rho-desc').style.color = rho >= 0.7 ? '#3fb950' : '#f0883e';
-}
-
-function updateMigLog(sa, sb) {
-  const all = [];
-  (sa?.migration_log || []).forEach(e => all.push(e));
-  (sb?.migration_log || []).forEach(e => all.push(e));
-  const logEl = $('mig-log');
-  if (!all.length) {
-    logEl.innerHTML = '<p class="no-data">No migration events yet. Generate heavy traffic to trigger migration.</p>';
-    return;
-  }
-  logEl.innerHTML = all.slice(-20).reverse().map(e =>
-    `<div class="log-entry">
-      <span class="ts">${e.time}</span>
-      <span class="msg">Switch <b>${e.switch}</b> migrated: Controller <b>${e.from}</b> → Controller <b>${e.to}</b></span>
-    </div>`
+  el.innerHTML=all.slice(-20).reverse().map(e=>
+    `<div class="log-item">
+       <span class="ts">${e.time}</span>
+       <span class="detail">Switch <b>${e.switch}</b>:
+         Controller <b>${e.from}</b> → Controller <b>${e.to}</b></span>
+     </div>`
   ).join('');
 }
 
-// ── Fetch + refresh ──────────────────────────────────────────────────────
-async function get(url) {
-  try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(2500) });
-    return r.ok ? r.json() : null;
-  } catch { return null; }
+// ── Fetch ─────────────────────────────────────────────────────────────────
+async function get(url){
+  try{ const r=await fetch(url,{signal:AbortSignal.timeout(2500)}); return r.ok?r.json():null; }
+  catch{ return null; }
 }
 
-async function refresh() {
-  const [sa, la, sb, lb] = await Promise.all([
-    get(API.A + '/status'), get(API.A + '/load'),
-    get(API.B + '/status'), get(API.B + '/load'),
+async function refresh(){
+  const [sa,la,sb,lb] = await Promise.all([
+    get(API.A+'/status'), get(API.A+'/load'),
+    get(API.B+'/status'), get(API.B+'/load'),
   ]);
 
-  sa ? updateCtrl('A', sa, la) : setOffline('A');
-  sb ? updateCtrl('B', sb, lb) : setOffline('B');
+  sa?updateCtrl('A',sa,la):setOffline('A');
+  sb?updateCtrl('B',sb,lb):setOffline('B');
 
-  updateRho(sa, sb);
-  updateMigLog(sa, sb);
-  pushChart(sa ? (sa.total_load ?? 0) : null, sb ? (sb.total_load ?? 0) : null);
+  const rho = updateRho(sa,sb)??1.0;
+  updateMigLog(sa,sb);
 
-  $('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString('vi-VN');
+  const la_=sa?(sa.total_load??0):0, lb_=sb?(sb.total_load??0):0;
+  pushData(la_,lb_,rho);
+
+  $('footer').textContent='Last update: '+new Date().toLocaleTimeString()
+    +'  |  Elapsed: '+elapsed()+'s';
 }
 
 refresh();
-setInterval(refresh, 3000);
+setInterval(refresh,3000);
 </script>
 </body>
 </html>

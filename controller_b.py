@@ -33,6 +33,7 @@ CONFIG = {
     'PEER_PREFIX'       : '10.0.1',
     # S4 (dpid=4) inter-domain port = 4 (last link added in topology.py)
     'INTER_DOMAIN_PORTS': {4: 4},
+    'INITIAL_SWITCHES'  : [3, 4, 5],
 }
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -41,7 +42,8 @@ NAME = CONFIG['CONTROLLER_NAME']
 # Force Ryu WSGI to bind on our configured port instead of the default 8080
 try:
     from ryu import cfg as _ryu_cfg
-    _ryu_cfg.CONF.wsapi_port = CONFIG['REST_PORT']
+    _ryu_cfg.CONF.ofp_tcp_listen_port = CONFIG['OF_PORT']   # 6634
+    _ryu_cfg.CONF.wsapi_port = CONFIG['REST_PORT']          # 8081
     _ryu_cfg.CONF.wsapi_host = '0.0.0.0'
 except Exception:
     pass
@@ -79,6 +81,7 @@ class DALBController(app_manager.RyuApp):
         self.ct = float(CONFIG['CT_INITIAL'])
         self.inter_domain_ports = dict(CONFIG['INTER_DOMAIN_PORTS'])
         self.migration_log = []
+        self.owned_switches = set(CONFIG['INITIAL_SWITCHES'])
 
         self.monitor_thread = hub.spawn(self._monitor_loop)
 
@@ -102,6 +105,12 @@ class DALBController(app_manager.RyuApp):
             self.port_stats_prev[dpid]  = {}
             self.prev_sample_time[dpid] = time.time()
 
+        if dpid not in self.owned_switches:
+            dp.send_msg(parser.OFPRoleRequest(
+                dp, role=ofp.OFPCR_ROLE_SLAVE, generation_id=0))
+            self.logger.info(f'[{_ts()}][SWITCH] S{dpid} → SLAVE on ctrl={NAME}')
+            return
+
         self._add_flow(dp, priority=0,
                        match=parser.OFPMatch(),
                        actions=[parser.OFPActionOutput(ofp.OFPP_CONTROLLER,
@@ -115,6 +124,8 @@ class DALBController(app_manager.RyuApp):
         msg    = ev.msg
         dp     = msg.datapath
         dpid   = dp.id
+        if dpid not in self.owned_switches:
+            return
         ofp    = dp.ofproto
         parser = dp.ofproto_parser
 
@@ -366,7 +377,7 @@ class DALBController(app_manager.RyuApp):
     def _switch_metrics(self):
         rows = []
         with self.lock:
-            dpids = list(self.datapaths.keys())
+            dpids = [d for d in self.datapaths if d in self.owned_switches]
         for dpid in dpids:
             with self.lock:
                 n    = self.flow_count.get(dpid, 0)
@@ -491,7 +502,7 @@ class DALBController(app_manager.RyuApp):
             return
 
         with self.lock:
-            self.datapaths.pop(dpid, None)
+            self.owned_switches.discard(dpid)
             self.switch_names.pop(dpid, None)
             self.migration_count += 1
             self.migration_log.append({
@@ -514,18 +525,25 @@ class DALBController(app_manager.RyuApp):
                 f'[{_ts()}][MIGRATE] {name} not connected after wait')
             return False
 
-        ofp = dp.ofproto
-        dp.send_msg(dp.ofproto_parser.OFPRoleRequest(
-            dp, role=ofp.OFPCR_ROLE_MASTER, generation_id=0))
+        ofp    = dp.ofproto
+        parser = dp.ofproto_parser
+        gen_id = int(time.time()) & 0xFFFFFFFF
+        dp.send_msg(parser.OFPRoleRequest(
+            dp, role=ofp.OFPCR_ROLE_MASTER, generation_id=gen_id))
 
         with self.lock:
+            self.owned_switches.add(dpid)
             self.switch_names[dpid] = name
             self.flow_count.setdefault(dpid, 0)
             self.packet_in_rate.setdefault(dpid, 0.0)
             self.rtt.setdefault(dpid, 1.0)
 
+        self._add_flow(dp, priority=0,
+                       match=parser.OFPMatch(),
+                       actions=[parser.OFPActionOutput(ofp.OFPP_CONTROLLER,
+                                                       ofp.OFPCML_NO_BUFFER)])
         self.logger.info(
-            f'[{_ts()}][MIGRATE] Received {name} → MASTER on Controller {NAME}')
+            f'[{_ts()}][MIGRATE] {name} → MASTER on Controller {NAME}')
         return True
 
     # ── REST data helpers ─────────────────────────────────────────────────────
@@ -540,6 +558,7 @@ class DALBController(app_manager.RyuApp):
             'switches'  : [{'name': m['name'], 'dpid': m['dpid'],
                              'load': round(m['load'], 2),
                              'flows': m['flows'],
+                             'rate' : round(m.get('rate', 0.0), 2),
                              'rtt_ms': round(m['rtt_ms'], 2)} for m in metrics],
             'timestamp' : _ts(),
         }
@@ -552,8 +571,8 @@ class DALBController(app_manager.RyuApp):
         try:
             r = requests.get(f'{CONFIG["PEER_REST_URL"]}/load', timeout=2)
             if r.status_code == 200:
-                d = r.json()
-                peer_load   = d.get('total_load', 0.0)
+                resp = r.json()
+                peer_load   = resp.get('total_load', 0.0)
                 peer_status = 'ONLINE'
         except requests.exceptions.RequestException:
             pass
@@ -561,7 +580,7 @@ class DALBController(app_manager.RyuApp):
         rho = self.dalb.calculate_rho(load_values)
         with self.lock:
             managed = sorted(self.switch_names.get(d, f'S{d}')
-                             for d in self.datapaths)
+                             for d in self.datapaths if d in self.owned_switches)
             mc  = self.migration_count
             log = list(self.migration_log[-20:])
         return {

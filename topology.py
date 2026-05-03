@@ -13,11 +13,25 @@ Normal links: 10Mbps, 1ms delay, TCLink
 """
 
 import sys
+import socket
 from mininet.net import Mininet
 from mininet.node import RemoteController, OVSSwitch
 from mininet.link import TCLink
 from mininet.cli import CLI
 from mininet.log import setLogLevel, info
+
+
+def check_controller(host, rest_port, name):
+    """Check controller is up by probing its REST API port."""
+    try:
+        s = socket.create_connection((host, rest_port), timeout=2)
+        s.close()
+        return True
+    except (ConnectionRefusedError, OSError):
+        script = f"controller_{'a' if name == 'A' else 'b'}.py"
+        print(f"\n[ERROR] Controller {name} REST API is NOT running on {host}:{rest_port}")
+        print(f"        Start it first:  ryu-manager {script}\n")
+        return False
 
 
 def build_topology():
@@ -84,11 +98,13 @@ def build_topology():
     info("*** Starting network\n")
     net.build()
 
-    s1.start([cA])
-    s2.start([cA])
-    s3.start([cB])
-    s4.start([cB])
-    s5.start([cB])
+    # Each switch connects to BOTH controllers so OFP role migration works.
+    # The first controller in the list becomes MASTER; the second SLAVE.
+    s1.start([cA, cB])
+    s2.start([cA, cB])
+    s3.start([cB, cA])
+    s4.start([cB, cA])
+    s5.start([cB, cA])
 
     info("*** Waiting for controllers (3s)\n")
     import time
@@ -106,6 +122,13 @@ def test_connectivity(net):
 
 def run(args=None):
     setLogLevel('info')
+
+    ok_a = check_controller('127.0.0.1', 8080, 'A')   # REST port — set programmatically
+    ok_b = check_controller('127.0.0.1', 8081, 'B')
+    if not ok_a or not ok_b:
+        print("Aborting. Please start both controllers before running topology.")
+        sys.exit(1)
+
     net = build_topology()
 
     if args and '--test' in args:
