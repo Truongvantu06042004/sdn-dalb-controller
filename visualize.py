@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 visualize.py — SDN DALB Scientific Visualization
-4-panel real-time charts (updates every 3 s):
+6-panel real-time charts (updates every 3 s):
   1. Average Packet-in Arrival Rate over Time  (like Fig.6 in paper)
-  2. Balance Index ρ over Time
-  3. Current C_Load per Switch (bar)
-  4. System Status + Migration Log
+  2. Load Balance Index ρ over Time
+  3. Switch-to-Controller RTT over Time        (latency evaluation)
+  4. Distributed Controllers' Throughput       (like Fig.5 in paper)
+  5. Current C_Load per Switch (bar)
+  6. System Status + Migration Log
 """
 
 import time
@@ -43,11 +45,15 @@ MIG_CLR  = '#ce93d8'   # purple — migration event
 lock  = threading.Lock()
 state = {'a': None, 'b': None, 'la': None, 'lb': None}
 history = {
-    'elapsed': [],   # seconds since program start
+    'elapsed': [],
     'load_a':  [],
     'load_b':  [],
     'rho':     [],
-    'migrate': [],   # True if migration fired at this point
+    'migrate': [],
+    'rtt_a':   [],   # avg switch-to-controller RTT for A (ms)
+    'rtt_b':   [],   # avg switch-to-controller RTT for B (ms)
+    'tput_a':  [],   # total data throughput via A's switches (Mbps)
+    'tput_b':  [],   # total data throughput via B's switches (Mbps)
 }
 _t0       = time.time()
 _prev_mc  = [0, 0]   # [mc_a, mc_b]
@@ -76,6 +82,16 @@ def fetch_loop():
         migrated = (mc_a > _prev_mc[0]) or (mc_b > _prev_mc[1])
         _prev_mc[0], _prev_mc[1] = mc_a, mc_b
 
+        # RTT averages (avg switch-to-controller RTT per domain)
+        sws_a = la.get('switches', []) if la else []
+        sws_b = lb.get('switches', []) if lb else []
+        rtt_a = (sum(sw.get('rtt_ms', 0) for sw in sws_a) / len(sws_a)) if sws_a else 0.0
+        rtt_b = (sum(sw.get('rtt_ms', 0) for sw in sws_b) / len(sws_b)) if sws_b else 0.0
+
+        # Total throughput per controller (Mbps)
+        tput_a = sum(sw.get('throughput_mbps', 0) for sw in sws_a)
+        tput_b = sum(sw.get('throughput_mbps', 0) for sw in sws_b)
+
         with lock:
             state.update({'a': sa, 'b': sb, 'la': la, 'lb': lb})
             history['elapsed'].append(elapsed)
@@ -83,6 +99,10 @@ def fetch_loop():
             history['load_b'].append(load_b)
             history['rho'].append(rho)
             history['migrate'].append(migrated)
+            history['rtt_a'].append(rtt_a)
+            history['rtt_b'].append(rtt_b)
+            history['tput_a'].append(tput_a)
+            history['tput_b'].append(tput_b)
             if len(history['elapsed']) > MAX_HIST:
                 for k in history: history[k].pop(0)
 
@@ -106,20 +126,21 @@ plt.rcParams.update({
     'legend.fontsize' : 8,
 })
 
-fig = plt.figure(figsize=(14, 8), facecolor=BG)
+fig = plt.figure(figsize=(14, 11), facecolor=BG)
 fig.canvas.manager.set_window_title('SDN DALB — Scientific Visualization')
 
-gs = gridspec.GridSpec(2, 3, figure=fig,
-                       height_ratios=[1.5, 1],
-                       hspace=0.48, wspace=0.36,
-                       left=0.07, right=0.97, top=0.91, bottom=0.09)
+gs = gridspec.GridSpec(3, 2, figure=fig,
+                       hspace=0.52, wspace=0.36,
+                       left=0.07, right=0.97, top=0.93, bottom=0.07)
 
-ax_load = fig.add_subplot(gs[0, :2])   # Load history (wide, top-left) — like Fig.6
-ax_rho  = fig.add_subplot(gs[0,  2])   # ρ history (top-right)
-ax_sw   = fig.add_subplot(gs[1, :2])   # Per-switch current load (wide, bottom-left)
-ax_info = fig.add_subplot(gs[1,  2])   # System status (bottom-right)
+ax_load = fig.add_subplot(gs[0, 0])   # Packet-in arrival rate (like Fig.6)
+ax_rho  = fig.add_subplot(gs[0, 1])   # ρ over time
+ax_rtt  = fig.add_subplot(gs[1, 0])   # Switch-to-controller RTT (latency)
+ax_tput = fig.add_subplot(gs[1, 1])   # Distributed Controllers' Throughput (like Fig.5)
+ax_sw   = fig.add_subplot(gs[2, 0])   # Per-switch C_Load bars
+ax_info = fig.add_subplot(gs[2, 1])   # System status
 
-for ax in (ax_load, ax_rho, ax_sw, ax_info):
+for ax in (ax_load, ax_rho, ax_rtt, ax_tput, ax_sw, ax_info):
     ax.set_facecolor(PANEL)
     for sp in ax.spines.values():
         sp.set_edgecolor(BORDER)
@@ -149,7 +170,7 @@ def update(_):
           sb.get('ct', 1000) if sb else 1000)
 
     # ════════════════════════════════════════════════════════════════════════
-    # Panel 1: Average Packet-in Arrival Rate over Time  (like Fig.6 in paper)
+    # Panel 1 — Average Packet-in Arrival Rate over Time  (like Fig.6 in paper)
     # ════════════════════════════════════════════════════════════════════════
     ax_load.cla()
     ax_load.set_facecolor(PANEL)
@@ -161,29 +182,22 @@ def update(_):
     ax_load.set_axisbelow(True)
 
     if len(hist['elapsed']) >= 2:
-        xs = hist['elapsed']
+        xs  = hist['elapsed']
         la_ = hist['load_a']
         lb_ = hist['load_b']
-
-        ax_load.plot(xs, la_, color=CA, lw=2.2,
-                     label='Controller A', marker='o', markersize=3, markevery=5)
-        ax_load.plot(xs, lb_, color=CB, lw=2.2,
-                     label='Controller B', marker='s', markersize=3, markevery=5)
+        ax_load.plot(xs, la_, color=CA, lw=2.2, label='Controller A',
+                     marker='o', markersize=3, markevery=5)
+        ax_load.plot(xs, lb_, color=CB, lw=2.2, label='Controller B',
+                     marker='s', markersize=3, markevery=5)
         ax_load.fill_between(xs, la_, alpha=0.12, color=CA)
         ax_load.fill_between(xs, lb_, alpha=0.12, color=CB)
-
-        ax_load.axhline(ct, color=CT_CLR, lw=1.5, ls='--', alpha=0.85,
-                        label=f'CT = {ct:.0f}')
-
+        ax_load.axhline(ct, color=CT_CLR, lw=1.5, ls='--', alpha=0.85, label=f'CT = {ct:.0f}')
         top = max(max(la_) if la_ else 0, max(lb_) if lb_ else 0, ct) * 1.28
         top = max(top, 200)
         _draw_migrate_lines(ax_load, xs, hist['migrate'], top)
-
         ax_load.set_ylim(0, top)
         ax_load.set_xlim(xs[0], xs[-1] + 1)
         ax_load.legend(loc='upper left')
-
-        # Annotate current values at right edge
         if la_:
             ax_load.annotate(f' {la_[-1]:.0f}', xy=(xs[-1], la_[-1]),
                              fontsize=8.5, color=CA, fontweight='bold', va='center')
@@ -196,7 +210,7 @@ def update(_):
                      color=GREY, fontsize=11)
 
     # ════════════════════════════════════════════════════════════════════════
-    # Panel 2: Balance Index ρ over Time
+    # Panel 2 — Load Balance Index ρ over Time
     # ════════════════════════════════════════════════════════════════════════
     ax_rho.cla()
     ax_rho.set_facecolor(PANEL)
@@ -207,30 +221,23 @@ def update(_):
     ax_rho.set_ylim(0, 1.1)
     ax_rho.grid(True, alpha=0.2, linestyle='--', color=BORDER)
     ax_rho.set_axisbelow(True)
-    ax_rho.axhline(0.7, color=RHO_BAD, lw=1.5, ls='--', alpha=0.8,
-                   label='ρ = 0.7 threshold')
+    ax_rho.axhline(0.7, color=RHO_BAD, lw=1.5, ls='--', alpha=0.8, label='ρ = 0.7 threshold')
 
     if len(hist['elapsed']) >= 2:
-        xs    = np.array(hist['elapsed'], dtype=float)
-        rhos  = np.array(hist['rho'],     dtype=float)
-
+        xs   = np.array(hist['elapsed'], dtype=float)
+        rhos = np.array(hist['rho'],     dtype=float)
         ax_rho.plot(xs, rhos, color=TEXT, lw=1.8, zorder=3)
-        ax_rho.fill_between(xs, rhos, 0.7,
-                            where=(rhos >= 0.7), color=RHO_OK, alpha=0.25,
+        ax_rho.fill_between(xs, rhos, 0.7, where=(rhos >= 0.7), color=RHO_OK,  alpha=0.25,
                             label='Balanced (ρ ≥ 0.7)')
-        ax_rho.fill_between(xs, rhos, 0.7,
-                            where=(rhos < 0.7),  color=RHO_BAD, alpha=0.3,
+        ax_rho.fill_between(xs, rhos, 0.7, where=(rhos < 0.7),  color=RHO_BAD, alpha=0.3,
                             label='Imbalanced')
         _draw_migrate_lines(ax_rho, hist['elapsed'], hist['migrate'], 1.05)
-
         ax_rho.set_xlim(xs[0], xs[-1] + 1)
-
         rho_now = rhos[-1]
         rc = RHO_OK if rho_now >= 0.7 else RHO_BAD
         ax_rho.text(0.97, 0.97, f'ρ = {rho_now:.3f}',
                     transform=ax_rho.transAxes, ha='right', va='top',
                     fontsize=13, fontweight='bold', color=rc)
-
         ax_rho.legend(loc='lower right', fontsize=7.5)
     else:
         ax_rho.legend(loc='lower right', fontsize=7.5)
@@ -238,7 +245,85 @@ def update(_):
                     transform=ax_rho.transAxes, color=GREY)
 
     # ════════════════════════════════════════════════════════════════════════
-    # Panel 3: Current C_Load per Switch
+    # Panel 3 — Switch-to-Controller RTT over Time  (Latency evaluation)
+    # ════════════════════════════════════════════════════════════════════════
+    ax_rtt.cla()
+    ax_rtt.set_facecolor(PANEL)
+    ax_rtt.set_title('Switch-to-Controller RTT over Time  (Control-Plane Latency)',
+                     pad=8, color=TEXT)
+    ax_rtt.set_xlabel('Time (s)', color=TEXT)
+    ax_rtt.set_ylabel('RTT (ms)', color=TEXT)
+    ax_rtt.tick_params(colors=GREY)
+    ax_rtt.grid(True, alpha=0.2, linestyle='--', color=BORDER)
+    ax_rtt.set_axisbelow(True)
+
+    if len(hist['elapsed']) >= 2:
+        xs    = hist['elapsed']
+        rtt_a = hist['rtt_a']
+        rtt_b = hist['rtt_b']
+        ax_rtt.plot(xs, rtt_a, color=CA, lw=2.0, label='Avg RTT — Controller A',
+                    marker='o', markersize=3, markevery=5)
+        ax_rtt.plot(xs, rtt_b, color=CB, lw=2.0, label='Avg RTT — Controller B',
+                    marker='s', markersize=3, markevery=5)
+        ax_rtt.fill_between(xs, rtt_a, alpha=0.12, color=CA)
+        ax_rtt.fill_between(xs, rtt_b, alpha=0.12, color=CB)
+        top = max(max(rtt_a) if rtt_a else 0, max(rtt_b) if rtt_b else 0) * 1.4
+        top = max(top, 10)
+        _draw_migrate_lines(ax_rtt, xs, hist['migrate'], top)
+        ax_rtt.set_ylim(0, top)
+        ax_rtt.set_xlim(xs[0], xs[-1] + 1)
+        ax_rtt.legend(loc='upper left')
+        if rtt_a:
+            ax_rtt.annotate(f' {rtt_a[-1]:.1f}ms', xy=(xs[-1], rtt_a[-1]),
+                            fontsize=8, color=CA, fontweight='bold', va='center')
+        if rtt_b:
+            ax_rtt.annotate(f' {rtt_b[-1]:.1f}ms', xy=(xs[-1], rtt_b[-1]),
+                            fontsize=8, color=CB, fontweight='bold', va='center')
+    else:
+        ax_rtt.text(0.5, 0.5, 'Waiting for RTT data…', ha='center', va='center',
+                    transform=ax_rtt.transAxes, color=GREY, fontsize=10)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # Panel 4 — Distributed Controllers' Throughput  (like Fig.5 in paper)
+    # ════════════════════════════════════════════════════════════════════════
+    ax_tput.cla()
+    ax_tput.set_facecolor(PANEL)
+    ax_tput.set_title("Distributed Controllers' Throughput over Time",
+                      pad=8, color=TEXT)
+    ax_tput.set_xlabel('Time (s)', color=TEXT)
+    ax_tput.set_ylabel('Throughput (Mbps)', color=TEXT)
+    ax_tput.tick_params(colors=GREY)
+    ax_tput.grid(True, alpha=0.2, linestyle='--', color=BORDER)
+    ax_tput.set_axisbelow(True)
+
+    if len(hist['elapsed']) >= 2:
+        xs     = hist['elapsed']
+        tput_a = hist['tput_a']
+        tput_b = hist['tput_b']
+        ax_tput.plot(xs, tput_a, color=CA, lw=2.0, label='Controller A',
+                     marker='o', markersize=3, markevery=5)
+        ax_tput.plot(xs, tput_b, color=CB, lw=2.0, label='Controller B',
+                     marker='s', markersize=3, markevery=5)
+        ax_tput.fill_between(xs, tput_a, alpha=0.12, color=CA)
+        ax_tput.fill_between(xs, tput_b, alpha=0.12, color=CB)
+        top = max(max(tput_a) if tput_a else 0, max(tput_b) if tput_b else 0) * 1.3
+        top = max(top, 1.0)
+        _draw_migrate_lines(ax_tput, xs, hist['migrate'], top)
+        ax_tput.set_ylim(0, top)
+        ax_tput.set_xlim(xs[0], xs[-1] + 1)
+        ax_tput.legend(loc='upper left')
+        if tput_a:
+            ax_tput.annotate(f' {tput_a[-1]:.2f}', xy=(xs[-1], tput_a[-1]),
+                             fontsize=8, color=CA, fontweight='bold', va='center')
+        if tput_b:
+            ax_tput.annotate(f' {tput_b[-1]:.2f}', xy=(xs[-1], tput_b[-1]),
+                             fontsize=8, color=CB, fontweight='bold', va='center')
+    else:
+        ax_tput.text(0.5, 0.5, 'Waiting for throughput data…', ha='center', va='center',
+                     transform=ax_tput.transAxes, color=GREY, fontsize=10)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # Panel 5 — Current C_Load per Switch
     # ════════════════════════════════════════════════════════════════════════
     ax_sw.cla()
     ax_sw.set_facecolor(PANEL)
@@ -262,29 +347,22 @@ def update(_):
         loads  = [s.get('load', 0) for s in sw_list]
         flows  = [s.get('flows', 0) for s in sw_list]
         colors = [CA if s['ctrl'] == 'A' else CB for s in sw_list]
-
-        bars = ax_sw.bar(names, loads, color=colors, width=0.5,
-                         edgecolor='white', linewidth=0.4, alpha=0.88)
+        bars   = ax_sw.bar(names, loads, color=colors, width=0.5,
+                           edgecolor='white', linewidth=0.4, alpha=0.88)
         for bar, load, flow in zip(bars, loads, flows):
             x = bar.get_x() + bar.get_width() / 2
-            ax_sw.text(x, bar.get_height() + 2,
-                       f'{load:.0f}', ha='center', va='bottom',
-                       fontsize=9.5, color=TEXT, fontweight='bold')
+            ax_sw.text(x, bar.get_height() + 2, f'{load:.0f}',
+                       ha='center', va='bottom', fontsize=9.5, color=TEXT, fontweight='bold')
             if bar.get_height() > 30:
-                ax_sw.text(x, bar.get_height() / 2,
-                           f'{flow}F', ha='center', va='center',
-                           fontsize=7.5, color='white', alpha=0.9)
-
-        ax_sw.axhline(ct, color=CT_CLR, lw=1.5, ls='--', alpha=0.85,
-                      label=f'CT = {ct:.0f}')
+                ax_sw.text(x, bar.get_height() / 2, f'{flow}F',
+                           ha='center', va='center', fontsize=7.5, color='white', alpha=0.9)
+        ax_sw.axhline(ct, color=CT_CLR, lw=1.5, ls='--', alpha=0.85, label=f'CT = {ct:.0f}')
         top_sw = max(max(loads) if loads else 0, ct) * 1.3 + 20
         ax_sw.set_ylim(0, top_sw)
-
         legend_els = [
             mpatches.Patch(facecolor=CA, label='Domain A (Controller A)'),
             mpatches.Patch(facecolor=CB, label='Domain B (Controller B)'),
-            mlines.Line2D([], [], color=CT_CLR, ls='--', lw=1.5,
-                          label=f'CT = {ct:.0f}'),
+            mlines.Line2D([], [], color=CT_CLR, ls='--', lw=1.5, label=f'CT = {ct:.0f}'),
         ]
         ax_sw.legend(handles=legend_els, loc='upper right', fontsize=8)
     else:
@@ -294,7 +372,7 @@ def update(_):
                    transform=ax_sw.transAxes, color=GREY, fontsize=10)
 
     # ════════════════════════════════════════════════════════════════════════
-    # Panel 4: System Status + Migration Log
+    # Panel 6 — System Status + Migration Log
     # ════════════════════════════════════════════════════════════════════════
     ax_info.cla()
     ax_info.set_facecolor(PANEL)

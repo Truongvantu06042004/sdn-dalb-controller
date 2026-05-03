@@ -148,7 +148,22 @@ tr:hover td{background:#20203a}
 
   </div><!-- /row-chart -->
 
-  <!-- ── Row 3: ρ gauge + Migration log ────────────────────────────────── -->
+  <!-- ── Row 3: RTT + Throughput charts ───────────────────────────────── -->
+  <div class="row row-2">
+
+    <div class="card">
+      <div class="card-title">Switch-to-Controller RTT over Time (Control-Plane Latency)</div>
+      <canvas id="chartRtt" height="110"></canvas>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Distributed Controllers' Throughput over Time</div>
+      <canvas id="chartTput" height="110"></canvas>
+    </div>
+
+  </div><!-- /row-2 rtt+tput -->
+
+  <!-- ── Row 4: ρ gauge + Migration log ────────────────────────────────── -->
   <div class="row row-2">
 
     <div class="card">
@@ -273,6 +288,60 @@ const chartRho = new Chart($('chartRho').getContext('2d'), {
   }
 });
 
+// ── Chart: RTT history ────────────────────────────────────────────────────
+const rttLabels=[], dRttA=[], dRttB=[];
+const chartRtt = new Chart($('chartRtt').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: rttLabels,
+    datasets: [
+      { label: 'Avg RTT — Controller A', data: dRttA,
+        borderColor:'#4fc3f7', backgroundColor:'rgba(79,195,247,.08)',
+        tension:.3, pointRadius:2, pointHoverRadius:4, fill:true, borderWidth:2 },
+      { label: 'Avg RTT — Controller B', data: dRttB,
+        borderColor:'#ef5350', backgroundColor:'rgba(239,83,80,.08)',
+        tension:.3, pointRadius:2, pointHoverRadius:4, fill:true, borderWidth:2 },
+    ]
+  },
+  options:{
+    animation:false, responsive:true, interaction:{mode:'index',intersect:false},
+    scales:{
+      x:{ title:{display:true,text:'Time (s)',color:'#6a6a8a',font:{size:11}},
+          ticks:{color:'#4a4a6a',maxTicksLimit:8,font:{size:10}}, grid:{color:'#22223a'} },
+      y:{ title:{display:true,text:'RTT (ms)',color:'#6a6a8a',font:{size:11}},
+          ticks:{color:'#4a4a6a',font:{size:10}}, grid:{color:'#22223a'}, beginAtZero:true }
+    },
+    plugins:{ legend:{labels:{color:'#9a9aba',boxWidth:14,font:{size:11}}} }
+  }
+});
+
+// ── Chart: Throughput history ─────────────────────────────────────────────
+const tputLabels=[], dTputA=[], dTputB=[];
+const chartTput = new Chart($('chartTput').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: tputLabels,
+    datasets: [
+      { label: 'Controller A', data: dTputA,
+        borderColor:'#4fc3f7', backgroundColor:'rgba(79,195,247,.08)',
+        tension:.3, pointRadius:2, pointHoverRadius:4, fill:true, borderWidth:2 },
+      { label: 'Controller B', data: dTputB,
+        borderColor:'#ef5350', backgroundColor:'rgba(239,83,80,.08)',
+        tension:.3, pointRadius:2, pointHoverRadius:4, fill:true, borderWidth:2 },
+    ]
+  },
+  options:{
+    animation:false, responsive:true, interaction:{mode:'index',intersect:false},
+    scales:{
+      x:{ title:{display:true,text:'Time (s)',color:'#6a6a8a',font:{size:11}},
+          ticks:{color:'#4a4a6a',maxTicksLimit:8,font:{size:10}}, grid:{color:'#22223a'} },
+      y:{ title:{display:true,text:'Throughput (Mbps)',color:'#6a6a8a',font:{size:11}},
+          ticks:{color:'#4a4a6a',font:{size:10}}, grid:{color:'#22223a'}, beginAtZero:true }
+    },
+    plugins:{ legend:{labels:{color:'#9a9aba',boxWidth:14,font:{size:11}}} }
+  }
+});
+
 function updateCTAnnotation(ct){
   chartLoad.options.plugins.annotation.annotations.ctLine.yMin = ct;
   chartLoad.options.plugins.annotation.annotations.ctLine.yMax = ct;
@@ -294,16 +363,22 @@ function addMigrationAnnotation(t_s){
 }
 
 // ── Push data points ──────────────────────────────────────────────────────
-function pushData(la, lb, rho){
+function pushData(la, lb, rho, rttA, rttB, tputA, tputB){
   const t = elapsed();
   loadLabels.push(t); dA.push(la); dB.push(lb);
   rhoLabels.push(t);  dRho.push(rho);
+  rttLabels.push(t);  dRttA.push(rttA); dRttB.push(rttB);
+  tputLabels.push(t); dTputA.push(tputA); dTputB.push(tputB);
   if(loadLabels.length > MAX_PTS){
     loadLabels.shift(); dA.shift(); dB.shift();
     rhoLabels.shift();  dRho.shift();
+    rttLabels.shift();  dRttA.shift(); dRttB.shift();
+    tputLabels.shift(); dTputA.shift(); dTputB.shift();
   }
   chartLoad.update('none');
   chartRho.update('none');
+  chartRtt.update('none');
+  chartTput.update('none');
 }
 
 // ── Per-controller update ─────────────────────────────────────────────────
@@ -422,7 +497,16 @@ async function refresh(){
   updateMigLog(sa,sb);
 
   const la_=sa?(sa.total_load??0):0, lb_=sb?(sb.total_load??0):0;
-  pushData(la_,lb_,rho);
+
+  // RTT averages per controller
+  const swsA=la?.switches||[], swsB=lb?.switches||[];
+  const rttA=swsA.length?swsA.reduce((s,sw)=>s+(sw.rtt_ms||0),0)/swsA.length:0;
+  const rttB=swsB.length?swsB.reduce((s,sw)=>s+(sw.rtt_ms||0),0)/swsB.length:0;
+  // Total throughput per controller (Mbps)
+  const tputA=swsA.reduce((s,sw)=>s+(sw.throughput_mbps||0),0);
+  const tputB=swsB.reduce((s,sw)=>s+(sw.throughput_mbps||0),0);
+
+  pushData(la_,lb_,rho,rttA,rttB,tputA,tputB);
 
   $('footer').textContent='Last update: '+new Date().toLocaleTimeString()
     +'  |  Elapsed: '+elapsed()+'s';

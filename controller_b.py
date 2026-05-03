@@ -76,6 +76,8 @@ class DALBController(app_manager.RyuApp):
         self.packet_in_rate   = {}
         self.rtt              = {}
         self.port_stats_prev  = {}
+        self.port_bytes_prev  = {}
+        self.throughput_bps   = {}
         self.prev_sample_time = {}
 
         self.ct = float(CONFIG['CT_INITIAL'])
@@ -103,6 +105,8 @@ class DALBController(app_manager.RyuApp):
             self.packet_in_rate[dpid]   = 0.0
             self.rtt[dpid]              = 1.0
             self.port_stats_prev[dpid]  = {}
+            self.port_bytes_prev[dpid]  = {}
+            self.throughput_bps[dpid]   = 0.0
             self.prev_sample_time[dpid] = time.time()
 
         if dpid not in self.owned_switches:
@@ -305,7 +309,8 @@ class DALBController(app_manager.RyuApp):
         now    = time.time()
         i_port = self.inter_domain_ports.get(dpid, -1)
 
-        total_rx_delta = 0
+        total_rx_delta       = 0
+        total_rx_bytes_delta = 0
         with self.lock:
             elapsed = max(now - self.prev_sample_time.get(dpid, now), 1.0)
             for stat in ev.msg.body:
@@ -315,7 +320,11 @@ class DALBController(app_manager.RyuApp):
                 rx_prev = self.port_stats_prev.get(dpid, {}).get(pno, stat.rx_packets)
                 total_rx_delta += max(0, stat.rx_packets - rx_prev)
                 self.port_stats_prev.setdefault(dpid, {})[pno] = stat.rx_packets
+                rb_prev = self.port_bytes_prev.get(dpid, {}).get(pno, stat.rx_bytes)
+                total_rx_bytes_delta += max(0, stat.rx_bytes - rb_prev)
+                self.port_bytes_prev.setdefault(dpid, {})[pno] = stat.rx_bytes
             self.packet_in_rate[dpid] = total_rx_delta / elapsed
+            self.throughput_bps[dpid] = total_rx_bytes_delta / elapsed
             self.prev_sample_time[dpid] = now
 
     @set_ev_cls(ofp_event.EventOFPEchoReply, MAIN_DISPATCHER)
@@ -383,10 +392,12 @@ class DALBController(app_manager.RyuApp):
                 n    = self.flow_count.get(dpid, 0)
                 f    = self.packet_in_rate.get(dpid, 0.0)
                 r    = self.rtt.get(dpid, 1.0)
+                bps  = self.throughput_bps.get(dpid, 0.0)
                 name = self.switch_names.get(dpid, f'S{dpid}')
             rows.append({'dpid': dpid, 'name': name,
                          'load': self.dalb.calculate_switch_load(n, f, r),
-                         'flows': n, 'rate': f, 'rtt_ms': r})
+                         'flows': n, 'rate': f, 'rtt_ms': r,
+                         'throughput_bps': bps})
         return rows
 
     def get_total_load(self):
@@ -559,7 +570,8 @@ class DALBController(app_manager.RyuApp):
                              'load': round(m['load'], 2),
                              'flows': m['flows'],
                              'rate' : round(m.get('rate', 0.0), 2),
-                             'rtt_ms': round(m['rtt_ms'], 2)} for m in metrics],
+                             'rtt_ms': round(m['rtt_ms'], 2),
+                             'throughput_mbps': round(m.get('throughput_bps', 0) * 8 / 1_000_000, 4)} for m in metrics],
             'timestamp' : _ts(),
         }
 
