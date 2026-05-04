@@ -44,7 +44,8 @@ CONFIG = {
 }
 # ──────────────────────────────────────────────────────────────────────────────
 
-NAME = CONFIG['CONTROLLER_NAME']
+NAME      = CONFIG['CONTROLLER_NAME']
+PEER_NAME = 'B' if NAME == 'A' else 'A'
 
 # Force Ryu WSGI to bind on our configured port instead of the default 8080
 try:
@@ -68,10 +69,11 @@ class DALBController(app_manager.RyuApp):
         super().__init__(*args, **kwargs)
         kwargs['wsgi'].register(DALBRestAPI, {'ctrl': self})
 
-        self.dalb       = DALBMetrics()
-        self.lock       = threading.Lock()
-        self.start_time = time.time()
+        self.dalb         = DALBMetrics()
+        self.lock         = threading.Lock()
+        self.start_time   = time.time()
         self.migration_count = 0
+        self._role_gen_id = int(time.time()) & 0xFFFFFFFF
 
         # OpenFlow state
         self.datapaths    = {}   # dpid -> datapath
@@ -100,6 +102,12 @@ class DALBController(app_manager.RyuApp):
         self.owned_switches = set(CONFIG['INITIAL_SWITCHES'])
 
         self.monitor_thread = hub.spawn(self._monitor_loop)
+
+    def _next_gen_id(self):
+        """Monotonically increasing generation ID — prevents OFPRRFC_STALE on role changes."""
+        with self.lock:
+            self._role_gen_id = (self._role_gen_id + 1) & 0xFFFFFFFF
+            return self._role_gen_id
 
     # ── OpenFlow: switch connect ───────────────────────────────────────────────
 
@@ -418,6 +426,8 @@ class DALBController(app_manager.RyuApp):
             with self.lock:
                 dps = dict(self.datapaths)
             for dpid, dp in dps.items():
+                if dpid not in self.owned_switches:
+                    continue   # skip SLAVE switches — no stats needed
                 self._req_flow_stats(dp)
                 self._req_port_stats(dp)
                 self._req_echo(dp)
@@ -537,23 +547,29 @@ class DALBController(app_manager.RyuApp):
         with self.lock:
             dp = self.datapaths.get(dpid)
         if dp:
-            ofp = dp.ofproto
+            ofp    = dp.ofproto
+            gen_id = self._next_gen_id()
             dp.send_msg(dp.ofproto_parser.OFPRoleRequest(
-                dp, role=ofp.OFPCR_ROLE_SLAVE, generation_id=0))
+                dp, role=ofp.OFPCR_ROLE_SLAVE, generation_id=gen_id))
 
+        i_port  = self.inter_domain_ports.get(dpid)
+        payload = {'dpid': dpid, 'name': name}
+        if i_port is not None:
+            payload['inter_domain_port'] = i_port
         try:
             r = requests.post(
                 f'{CONFIG["PEER_REST_URL"]}/migrate',
-                json={'dpid': dpid, 'name': name}, timeout=5)
+                json=payload, timeout=5)
             r.raise_for_status()
             self.logger.info(
                 f'[{_ts()}][MIGRATE] ✅ SUCCESS: {name} → {target_name} | {r.json()}')
         except requests.exceptions.RequestException as e:
             self.logger.error(f'[{_ts()}][MIGRATE] ❌ FAILED: {e}')
             if dp:
-                ofp = dp.ofproto
+                ofp    = dp.ofproto
+                gen_id = self._next_gen_id()
                 dp.send_msg(dp.ofproto_parser.OFPRoleRequest(
-                    dp, role=ofp.OFPCR_ROLE_MASTER, generation_id=0))
+                    dp, role=ofp.OFPCR_ROLE_MASTER, generation_id=gen_id))
             return
 
         with self.lock:
@@ -565,7 +581,7 @@ class DALBController(app_manager.RyuApp):
                 'from': NAME, 'to': target_name,
             })
 
-    def accept_switch(self, dpid, name):
+    def accept_switch(self, dpid, name, inter_domain_port=None):
         """Promote an incoming switch to MASTER (called from REST /migrate)."""
         with self.lock:
             dp = self.datapaths.get(dpid)
@@ -583,8 +599,7 @@ class DALBController(app_manager.RyuApp):
 
         ofp    = dp.ofproto
         parser = dp.ofproto_parser
-        # Use a time-based gen_id (larger than the initial 0) so OVS accepts
-        gen_id = int(time.time()) & 0xFFFFFFFF
+        gen_id = self._next_gen_id()
         dp.send_msg(parser.OFPRoleRequest(
             dp, role=ofp.OFPCR_ROLE_MASTER, generation_id=gen_id))
 
@@ -594,6 +609,12 @@ class DALBController(app_manager.RyuApp):
             self.flow_count.setdefault(dpid, 0)
             self.packet_in_rate.setdefault(dpid, 0.0)
             self.rtt.setdefault(dpid, 1.0)
+            if inter_domain_port is not None:
+                self.inter_domain_ports[dpid] = inter_domain_port
+            self.migration_log.append({
+                'time': _ts(), 'switch': name,
+                'from': PEER_NAME, 'to': NAME,
+            })
 
         # (Re)install table-miss so the switch sends Packet-In to us
         self._add_flow(dp, priority=0,
@@ -690,13 +711,16 @@ class DALBRestAPI(ControllerBase):
     @route('migrate', '/migrate', methods=['POST'])
     def post_migrate(self, req, **_):
         try:
-            body = json.loads(req.body)
-            dpid = int(body['dpid'])
-            name = str(body['name'])
+            body   = json.loads(req.body)
+            dpid   = int(body['dpid'])
+            name   = str(body['name'])
+            i_port = body.get('inter_domain_port')
+            if i_port is not None:
+                i_port = int(i_port)
         except (KeyError, ValueError, json.JSONDecodeError) as e:
             return _json({'status': 'error', 'message': str(e)}, code=400)
 
-        ok = self.ctrl.accept_switch(dpid, name)
+        ok = self.ctrl.accept_switch(dpid, name, inter_domain_port=i_port)
         if ok:
             return _json({'status': 'ok',
                           'message': f'{name} is now MASTER on Controller {NAME}'})

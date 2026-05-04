@@ -99,7 +99,7 @@ tr:hover td{background:#20203a}
       <p style="color:#6a6a8a;font-size:11px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">
         Per-Switch Detail</p>
       <table>
-        <thead><tr><th>Switch</th><th>Flows (N)</th><th>Rate (F) /s</th><th>RTT (R) ms</th><th>C_Load</th></tr></thead>
+        <thead><tr><th>Switch</th><th>Flows (N)</th><th>Rate (F) /s</th><th>RTT (R) ms</th><th>Tput (Mbps)</th><th>C_Load</th></tr></thead>
         <tbody id="tbl-a"><tr><td colspan="5" class="no-data">Waiting…</td></tr></tbody>
       </table>
     </div>
@@ -121,7 +121,7 @@ tr:hover td{background:#20203a}
       <p style="color:#6a6a8a;font-size:11px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">
         Per-Switch Detail</p>
       <table>
-        <thead><tr><th>Switch</th><th>Flows (N)</th><th>Rate (F) /s</th><th>RTT (R) ms</th><th>C_Load</th></tr></thead>
+        <thead><tr><th>Switch</th><th>Flows (N)</th><th>Rate (F) /s</th><th>RTT (R) ms</th><th>Tput (Mbps)</th><th>C_Load</th></tr></thead>
         <tbody id="tbl-b"><tr><td colspan="5" class="no-data">Waiting…</td></tr></tbody>
       </table>
     </div>
@@ -421,6 +421,7 @@ function updateCtrl(c, status, load){
       <td>${sw.flows??0}</td>
       <td>${(sw.rate??0).toFixed(1)}</td>
       <td>${(sw.rtt_ms??0).toFixed(1)}</td>
+      <td>${(sw.throughput_mbps??0).toFixed(2)}</td>
       <td class="${loadClass(sp)}">${(sw.load||0).toFixed(1)}</td>
     </tr>`;
   }).join('');

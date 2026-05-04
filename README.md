@@ -36,7 +36,7 @@ Migration: OFPRoleRequest swaps MASTER/SLAVE ownership
 | `dalb_module.py` | Pure DALB math — all formulas from paper |
 | `dashboard.html` | Web dashboard — live charts (open in browser) |
 | `visualize.py` | Matplotlib real-time visualization |
-| `traffic_gen.py` | Automated traffic generator |
+| `traffic_gen.py` | Traffic generator — guided demo + auto mode |
 
 ---
 
@@ -113,9 +113,31 @@ ovs-vsctl --version       # 2.x
 
 ---
 
-## Running the Demo (3 terminals required)
+## Quick Start — Correct Startup Order
 
-### Terminal 1 — Start Controller A
+> **IMPORTANT**: Always open the dashboard and visualizer FIRST before starting controllers.
+> This ensures you see all events from the beginning, including switch connections and baseline load.
+
+### Step 1 — Open Dashboard (browser)
+
+```bash
+cd ~/Downloads/SDN_FInal/project
+xdg-open dashboard.html
+# or: firefox dashboard.html
+```
+
+The dashboard will show "waiting for data..." until controllers start — that is normal.
+
+### Step 2 — Open Visualizer (new terminal)
+
+```bash
+cd ~/Downloads/SDN_FInal/project
+python3 visualize.py
+```
+
+A 4-panel Matplotlib window opens and waits for data.
+
+### Step 3 — Start Controller A (new terminal)
 
 ```bash
 cd ~/Downloads/SDN_FInal/project
@@ -127,7 +149,7 @@ Wait for this line before continuing:
 (XXXXX) wsgi starting up on http://0.0.0.0:8080
 ```
 
-### Terminal 2 — Start Controller B
+### Step 4 — Start Controller B (new terminal)
 
 ```bash
 cd ~/Downloads/SDN_FInal/project
@@ -139,14 +161,14 @@ Wait for:
 (XXXXX) wsgi starting up on http://0.0.0.0:8081
 ```
 
-### Terminal 3 — Start Topology
+### Step 5 — Start Topology (new terminal)
 
 ```bash
 cd ~/Downloads/SDN_FInal/project
 sudo python3 topology.py
 ```
 
-If you forget a controller, the script exits immediately:
+If a controller is not running, the script exits immediately:
 ```
 [ERROR] Controller B is NOT running on 127.0.0.1:6634
         Start it first:  ryu-manager controller_b.py
@@ -170,9 +192,9 @@ When topology starts correctly, both controllers log switch connections:
 [SWITCH] S2 → SLAVE on ctrl=B
 ```
 
-### Test Connectivity
+### Step 6 — Test Connectivity
 
-In the Mininet CLI (Terminal 3):
+In the Mininet CLI (Terminal 5):
 
 ```
 mininet> pingall
@@ -183,15 +205,19 @@ Expected (after ~30s for ARP learning):
 *** Results: 0% dropped (110/110 received)
 ```
 
-If some X appear on the first run, run `pingall` again — second run will be 100%.
+If some X appear on first run, run `pingall` again — second run will be 100%.
 
 ---
 
-## Generating Traffic — Manual
+## Manual Demo Guide — All 5 Phases
 
-### Phase 1: Baseline (both controllers NORMAL)
+Run all commands inside the **Mininet CLI** (the terminal running `topology.py`).
 
-Start background pings — generates low constant Packet-In traffic:
+---
+
+### Phase 1: Baseline — Both Controllers NORMAL
+
+Start low-rate background pings to generate constant Packet-In traffic:
 
 ```
 mininet> h1 ping -i 0.5 10.0.1.2 &
@@ -203,16 +229,26 @@ mininet> h8 ping -i 0.5 10.0.2.4 &
 mininet> h9 ping -i 0.5 10.0.2.5 &
 ```
 
-Expected controller load tables (every 10s):
+Wait ~10 seconds for the monitor loop to pick up traffic.
+
+**Expected controller log output:**
 ```
 Controller A: Total ~14/s | CT=1000 | NORMAL
 Controller B: Total ~42/s | CT=1000 | NORMAL
 ρ ≈ 0.75 → balanced, no migration
 ```
 
-### Phase 2: Overload Domain B
+**Expected on Dashboard/Visualizer:**
+- Both controllers show low, roughly equal load bars
+- ρ line stays above 0.7 (green zone)
+- No migration events
 
-Start iperf UDP servers on domain B:
+---
+
+### Phase 2: Overload Domain B — Trigger Migration B→A
+
+Start iperf UDP servers on domain B hosts:
+
 ```
 mininet> h6  iperf -s -u -p 5001 &
 mininet> h9  iperf -s -u -p 5002 &
@@ -220,7 +256,8 @@ mininet> h10 iperf -s -u -p 5003 &
 mininet> h6  iperf -s -u -p 5010 &
 ```
 
-Send high-rate 64-byte UDP floods (~15,600 pkt/s per stream):
+Start high-rate 64-byte UDP floods (~15,600 pkt/s per stream):
+
 ```
 mininet> h7  iperf -c 10.0.2.1 -u -p 5001 -t 120 -b 8M -l 64 &
 mininet> h8  iperf -c 10.0.2.4 -u -p 5002 -t 120 -b 8M -l 64 &
@@ -230,7 +267,9 @@ mininet> h8  iperf -c 10.0.2.1 -u -p 5010 -t 120 -b 6M -l 64 &
 
 Rate math: 8 Mbps ÷ (64 bytes × 8 bits/byte) ≈ 15,625 pkt/s per stream
 
-Expected logs within 10–30 seconds:
+Wait 10–30 seconds for the DALB monitor cycle.
+
+**Expected controller log output:**
 ```
 Controller B: Total ~2100/s | CT=1000 | EXCEEDED ⚠️
 Controller B: ρ=0.52 < 0.70 [C1 ✅] AND my_load=2100 is MAX [C2 ✅] → MIGRATE
@@ -238,58 +277,168 @@ Controller B: [MIGRATE] S3 (load=700.0) Controller B → A
 Controller A: [MIGRATE] S3 → MASTER on Controller A
 ```
 
-### Phase 3: Verify Migration
+**Expected on Dashboard/Visualizer:**
+- Controller B bar spikes high (EXCEEDED/red)
+- ρ drops below 0.7 (red zone)
+- Migration event appears in log
+- Controller A bar rises (received S3), Controller B drops
+
+---
+
+### Phase 3: Verify Migration B→A
+
+Check which switches each controller now owns:
 
 ```bash
-# Controller A now manages S1, S2, S3
+# Run in a separate terminal (not Mininet CLI)
 curl http://127.0.0.1:8080/status
-
-# Controller B now manages only S4, S5
 curl http://127.0.0.1:8081/status
 ```
 
-Look for `"migration_count": 1` and `"managed_switches": ["S1","S2","S3"]` on Controller A.
+**Expected:**
+```json
+// Controller A
+{ "managed_switches": ["S1","S2","S3"], "migration_count": 1 }
+
+// Controller B
+{ "managed_switches": ["S4","S5"], "migration_count": 1 }
+```
 
 Expected loads after migration:
 ```
-Controller A: ~700/s (received S3's load)
-Controller B: ~1400/s (shed S3's load)
+Controller A: ~700/s (received S3's traffic)
+Controller B: ~1400/s (shed S3)
 ρ = 0.70+ → balanced
 ```
 
-### Stop All Traffic
-
+Test that cross-domain traffic still works:
 ```
-mininet> sh pkill iperf
-mininet> sh pkill ping
+mininet> pingall
 ```
 
 ---
 
-## Automated Demo
+### Phase 4: Stop Domain B Traffic — System Returns to NORMAL
+
+Stop all iperf and excess pings:
+
+```
+mininet> sh pkill -f 'iperf' 2>/dev/null
+mininet> sh pkill -f 'ping -i' 2>/dev/null
+```
+
+Wait 10–15 seconds for the monitor loop to update.
+
+**Expected controller log output:**
+```
+Controller A: Total ~0/s | CT=1000 | NORMAL
+Controller B: Total ~0/s | CT=1000 | NORMAL
+ρ → 1.0 → fully balanced
+```
+
+**Expected on Dashboard/Visualizer:**
+- Both controller bars drop to near zero
+- ρ line rises back to 1.0
+- S3 remains under Controller A (migration is permanent until reversed)
+
+---
+
+### Phase 5: Overload Domain A — Trigger Reverse Migration A→B
+
+Now flood domain A to overload Controller A (which manages S1, S2, S3 after Phase 2).
+
+Start iperf servers on domain A hosts:
+
+```
+mininet> h1 iperf -s -u -p 5001 &
+mininet> h2 iperf -s -u -p 5002 &
+mininet> h3 iperf -s -u -p 5003 &
+mininet> h4 iperf -s -u -p 5004 &
+```
+
+Start high-rate 64-byte UDP floods targeting domain A:
+
+```
+mininet> h2  iperf -c 10.0.1.1 -u -p 5001 -t 120 -b 8M -l 64 &
+mininet> h3  iperf -c 10.0.1.2 -u -p 5002 -t 120 -b 8M -l 64 &
+mininet> h5  iperf -c 10.0.1.3 -u -p 5003 -t 120 -b 8M -l 64 &
+```
+
+Wait 10–30 seconds for DALB to detect the overload.
+
+**Expected controller log output:**
+```
+Controller A: Total ~2100/s | CT=1000 | EXCEEDED ⚠️
+Controller A: ρ=0.52 < 0.70 [C1 ✅] AND my_load=2100 is MAX [C2 ✅] → MIGRATE
+Controller A: [MIGRATE] S3 (load=700.0) Controller A → B
+Controller B: [MIGRATE] S3 → MASTER on Controller B
+```
+
+**Expected on Dashboard/Visualizer:**
+- Controller A bar spikes (EXCEEDED/red)
+- ρ drops below 0.7 again
+- Reverse migration event logged (A→B this time)
+- S3 moves back to Controller B
+- System re-balances
+
+**Verify reverse migration:**
+```bash
+curl http://127.0.0.1:8080/status   # A: managed_switches should no longer include S3
+curl http://127.0.0.1:8081/status   # B: managed_switches should include S3 again
+```
+
+---
+
+### Stop All Traffic (any phase)
+
+```
+mininet> sh pkill -f 'iperf' 2>/dev/null
+mininet> sh pkill -f 'ping -i' 2>/dev/null
+```
+
+---
+
+## Automated Demo (`--auto` mode)
+
+The auto mode handles everything: starts topology internally, runs all 5 phases, and prints results.
+
+### Startup (open dashboard/visualizer FIRST)
 
 ```bash
-# Terminal 1 — Controller A must be running
+cd ~/Downloads/SDN_FInal/project
+# Step 1 — open dashboard in browser
+firefox dashboard.html &
+
+# Step 2 — open visualizer
+python3 visualize.py &
+
+# Step 3 — run interactive guided demo
 ryu-manager controller_a.py
-
-# Terminal 2 — Controller B must be running
 ryu-manager controller_b.py
-
-# Terminal 3 — Interactive guided demo
 python3 traffic_gen.py
 
-# Terminal 3 — Fully automatic (no input needed)
+# OR — run fully automatic (no input needed)
 sudo python3 traffic_gen.py --auto
 ```
 
-`--auto` mode sequence:
-1. Verifies both controllers are up
-2. Launches Mininet topology internally
-3. Waits for switches to connect
-4. Runs baseline ping traffic (20s)
-5. Starts iperf flood on domain B
-6. Waits 60s for DALB to trigger migration
-7. Prints final load comparison table
+### Auto Mode Sequence
+
+| Step | Action | Duration |
+|------|--------|----------|
+| 1 | Verify both controllers are reachable | instant |
+| 2 | Launch Mininet topology internally | ~5s |
+| 3 | Wait for all 5 switches to connect | ~10s |
+| 4 | Phase 1: start baseline ping traffic | 20s |
+| 5 | Phase 2: start iperf flood on domain B | — |
+| 6 | Wait for DALB to trigger B→A migration | 60s |
+| 7 | Phase 4: stop domain B traffic | 15s |
+| 8 | Phase 5: start iperf flood on domain A | — |
+| 9 | Wait for DALB to trigger A→B migration | 30s |
+| 10 | Print final load comparison table | instant |
+
+### Interactive Mode
+
+Running without `--auto` prints a step-by-step guide with exact commands for each phase. Follow the prompts — press Enter to advance to the next phase.
 
 ---
 
@@ -303,11 +452,13 @@ xdg-open dashboard.html
 firefox dashboard.html
 ```
 
+**Open BEFORE starting controllers** to capture all events from the start.
+
 Features:
-- Live bar charts: Controller A and B load
-- ρ history chart with 0.7 threshold line
-- Per-switch table: Switch | Flows(N) | Rate(F)/s | RTT(R)ms | C_Load
-- Migration event log
+- Live bar charts: Controller A and B load comparison
+- ρ (rho) history chart with 0.7 threshold line
+- Per-switch table: Switch | Flows(N) | Rate(F)/s | RTT(R)ms | Tput(Mbps) | C_Load
+- Migration event log with timestamps and direction (A→B or B→A)
 - Auto-refresh every 3 seconds
 
 ---
@@ -318,13 +469,15 @@ Features:
 python3 visualize.py
 ```
 
+**Open BEFORE starting controllers** to capture all events from the start.
+
 4-panel live plot (similar to paper Fig. 6):
 - Top-left: Controller load over time
-- Top-right: ρ index over time
-- Bottom-left: Per-switch C_Load bars
-- Bottom-right: System status text
+- Top-right: ρ index over time with 0.7 threshold
+- Bottom-left: Per-switch C_Load bars (color-coded by controller)
+- Bottom-right: System status, throughput, migration count
 
-Migration events appear as vertical purple dashed lines.
+Migration events appear as vertical purple dashed lines with timestamps.
 
 ---
 
@@ -345,8 +498,16 @@ curl http://127.0.0.1:8081/load
   "total_load": 14.3,
   "ct": 1000.0,
   "switches": [
-    {"name": "S1", "dpid": 1, "load": 8.2, "flows": 4, "rate": 8.0, "rtt_ms": 1.2},
-    {"name": "S2", "dpid": 2, "load": 6.1, "flows": 3, "rate": 6.0, "rtt_ms": 1.1}
+    {
+      "name": "S1", "dpid": 1,
+      "load": 8.2, "flows": 4, "rate": 8.0, "rtt_ms": 1.2,
+      "throughput_mbps": 0.12
+    },
+    {
+      "name": "S2", "dpid": 2,
+      "load": 6.1, "flows": 3, "rate": 6.0, "rtt_ms": 1.1,
+      "throughput_mbps": 0.08
+    }
   ],
   "timestamp": "19:23:45"
 }
@@ -386,10 +547,12 @@ curl "http://127.0.0.1:8080/arp?ip=10.0.1.1"
 
 ### POST /migrate — Accept a migrated switch
 
+Called automatically by the migrating controller. Manual trigger:
+
 ```bash
 curl -X POST http://127.0.0.1:8080/migrate \
      -H "Content-Type: application/json" \
-     -d '{"dpid": 3, "name": "S3"}'
+     -d '{"dpid": 3, "name": "S3", "inter_domain_port": 4}'
 ```
 
 ```json
@@ -400,8 +563,8 @@ curl -X POST http://127.0.0.1:8080/migrate \
 
 ## Host / IP / Switch Reference
 
-| Host | IP | MAC | Switch | Domain | Controller |
-|------|----|-----|--------|--------|------------|
+| Host | IP | MAC | Switch | Domain | Default Controller |
+|------|----|-----|--------|--------|--------------------|
 | h1 | 10.0.1.1/16 | 00:00:00:00:00:01 | S1 | A | A |
 | h2 | 10.0.1.2/16 | 00:00:00:00:00:02 | S1 | A | A |
 | h3 | 10.0.1.3/16 | 00:00:00:00:00:03 | S1 | A | A |
@@ -425,7 +588,7 @@ Inter-domain link: S2 port 4 ↔ S4 port 4 (100 Mbps, 2 ms delay)
 
 **pingall shows X for all domain B hosts (h6–h11)**
 → Controller B was not running when topology started. Switches already connected without it.
-Fix: `exit` → `sudo mn -c` → restart all three in order.
+Fix: `exit` → `sudo mn -c` → restart all five steps in order.
 
 **pingall shows some X on first run**
 → Normal. ARP tables are empty on first run. Run `pingall` a second time.
@@ -433,10 +596,15 @@ Fix: `exit` → `sudo mn -c` → restart all three in order.
 **Controller load shows 0.0/s despite traffic**
 → Monitor loop polls every 10 seconds. Wait 10–15 seconds after starting iperf.
 
-**Migration never triggers**
-→ Check that iperf server is listening before client starts.
+**Migration never triggers after Phase 2**
+→ Check iperf server is listening before client starts.
 → Watch Controller B log for `EXCEEDED` — if you never see it, iperf traffic isn't reaching the switch.
-→ Confirm you're running the latest code (both controllers must have `owned_switches` logic).
+→ Confirm both controllers are running the latest code.
+
+**Migration never triggers after Phase 5 (reverse migration)**
+→ Phase 5 only works AFTER Phase 2 has already migrated S3 to Controller A.
+→ Controller A must own ≥ 3 switches (S1, S2, S3) for Phase 5 to trigger.
+→ If Phase 2 never triggered, run Phase 2 first.
 
 **`Address already in use` when starting controller**
 → `pkill -f ryu-manager` then restart.
@@ -445,4 +613,8 @@ Fix: `exit` → `sudo mn -c` → restart all three in order.
 → Harmless kernel warning about HTB queue sizing. Does not affect functionality.
 
 **After migration, some cross-domain pings fail**
-→ After a switch migrates from B to A, the new controller's ARP/MAC table needs to repopulate. Run `pingall` once to trigger ARP learning on the new controller.
+→ After a switch migrates, the new controller's ARP/MAC table needs to repopulate. Run `pingall` once to trigger ARP learning on the new controller.
+
+**Dashboard or visualizer shows no data**
+→ Verify both controllers are running: `curl http://127.0.0.1:8080/load` and `curl http://127.0.0.1:8081/load`.
+→ Check for `Access-Control-Allow-Origin` — dashboard uses CORS; both controllers must respond.
